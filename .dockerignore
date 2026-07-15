@@ -1,0 +1,10 @@
+node_modules
+apps/web/node_modules
+apps/oracle/node_modules
+packages/db/node_modules
+packages/shared-types/node_modules
+packages/shared-types/contract/target
+apps/web/.next
+.pnpm-store
+.git
+**/.git

@@ -1,0 +1,28 @@
+node_modules
+
+# Env files — never commit secrets (ORACLE_SECRET_KEY, JWT_SECRET, DATABASE_URL, etc.)
+.env
+.env.local
+.env.*.local
+
+# Next.js
+.next
+out
+
+# Build outputs
+dist
+build
+
+# Rust / Soroban
+target
+
+# Misc
+.DS_Store
+*.log
+.soroban
+*.tsbuildinfo
+coverage
+.turbo
+presentation.html
+titip-file-generation-prompt.md
+titip-master-prompt.md

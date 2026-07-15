@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  stellarAddress  String         @id @map("stellar_address")
+  displayName     String?        @map("display_name")
+  walletType      String         @default("freighter") @map("wallet_type")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  escrowsAsBuyer  Escrow[]       @relation("BuyerEscrows")
+  escrowsAsSeller Escrow[]       @relation("SellerEscrows")
+  notifications   Notification[]
+  @@map("users")
+}
+
+model Escrow {
+  id                 String        @id @default(cuid())
+  contractEscrowId   BigInt        @map("contract_escrow_id")
+  contractAddress    String        @map("contract_address")
+  buyerAddress       String        @map("buyer_address")
+  sellerAddress      String        @map("seller_address")
+  amountUsdc         Decimal       @map("amount_usdc") @db.Decimal(20, 7)
+  status             EscrowStatus  @default(PENDING)
+  trackingNumber     String?       @map("tracking_number")
+  courierCode        CourierCode?  @map("courier_code")
+  qrisMerchantId     String?       @map("qris_merchant_id")
+  qrisMerchantName   String?       @map("qris_merchant_name")
+  qrisCategoryCode   String?       @map("qris_category_code")
+  qrisPayloadRaw     String?       @map("qris_payload_raw") @db.Text
+  timeoutAt          DateTime      @map("timeout_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  fundedAt           DateTime?     @map("funded_at")
+  shippedAt          DateTime?     @map("shipped_at")
+  deliveredAt        DateTime?     @map("delivered_at")
+  refundedAt         DateTime?     @map("refunded_at")
+  txHashFund         String?       @map("tx_hash_fund")
+  txHashRelease      String?       @map("tx_hash_release")
+  buyer              User          @relation("BuyerEscrows",  fields: [buyerAddress],  references: [stellarAddress])
+  seller             User          @relation("SellerEscrows", fields: [sellerAddress], references: [stellarAddress])
+  oracleEvents       OracleEvent[]
+  @@index([buyerAddress])
+  @@index([sellerAddress])
+  @@index([status])
+  @@index([contractEscrowId, contractAddress])
+  @@map("escrows")
+}
+
+model OracleEvent {
+  id              String   @id @default(cuid())
+  escrowId        String   @map("escrow_id")
+  eventType       String   @map("event_type")
+  courierResponse Json?    @map("courier_response")
+  confirmedAt     DateTime @default(now()) @map("confirmed_at")
+  oracleNodeId    String   @map("oracle_node_id")
+  escrow          Escrow   @relation(fields: [escrowId], references: [id])
+  @@index([escrowId])
+  @@map("oracle_events")
+}
+
+model QrisSession {
+  id           String   @id @default(cuid())
+  payloadRaw   String   @map("payload_raw") @db.Text
+  merchantId   String?  @map("merchant_id")
+  merchantName String?  @map("merchant_name")
+  catCode      String?  @map("cat_code")
+  amount       Decimal? @db.Decimal(20, 2)
+  parsedAt     DateTime @default(now()) @map("parsed_at")
+  escrowId     String?  @unique @map("escrow_id")
+  @@map("qris_sessions")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userAddress String   @map("user_address")
+  type        String
+  message     String
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userAddress], references: [stellarAddress])
+  @@index([userAddress, read])
+  @@map("notifications")
+}
+
+enum EscrowStatus {
+  PENDING
+  FUNDED
+  SHIPPED
+  DELIVERED
+  REFUNDED
+}
+
+enum CourierCode {
+  JNT
+  JNE
+  SICEPAT
+  ANTERAJA
+  POS_INDONESIA
+}
