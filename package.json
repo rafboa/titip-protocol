@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "pnpm --filter @titip/web dev",
     "build": "pnpm --filter @titip/web build",
-    "vercel-build": "npm --prefix packages/db run db:generate && npm --prefix apps/web run build",
+    "vercel-build": "npm --prefix packages/db install @prisma/client@6.19.3 && npm --prefix packages/db run db:generate && npm --prefix apps/web run build",
     "setup": "docker compose up -d && cd packages/db && pnpm db:generate && pnpm db:migrate && cd ../.. && echo Setup complete!",
     "demo:deploy": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-contract.ts",
     "demo:sac": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-usdc-sac.ts",
@@ -31,6 +31,6 @@
     "tsx": "^4.23.1"
   },
   "dependencies": {
-    "@prisma/client": "^7.8.0"
+    "@prisma/client": "6.19.3"
   }
 }
