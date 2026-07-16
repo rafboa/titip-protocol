@@ -3,9 +3,14 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "pnpm --filter @titip/web dev",
     "build": "pnpm --filter @titip/web build",
+    "vercel-build": "npm --prefix packages/db run db:generate && npm --prefix apps/web run build",
     "setup": "docker compose up -d && cd packages/db && pnpm db:generate && pnpm db:migrate && cd ../.. && echo Setup complete!",
     "demo:deploy": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-contract.ts",
     "demo:sac": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-usdc-sac.ts",
@@ -19,7 +24,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@11.13.0",
   "type": "module",
   "devDependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
