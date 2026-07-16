@@ -25,5 +25,8 @@
     "@stellar/stellar-sdk": "^16.0.1",
     "dotenv-cli": "^11.0.0",
     "tsx": "^4.23.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.8.0"
   }
 }
