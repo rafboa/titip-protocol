@@ -13,7 +13,7 @@ Install all tools before starting. Exact versions matter for Soroban.
 | Tool | Version | Install |
 |---|---|---|
 | Node.js | 20.x LTS | `nvm install 20 && nvm use 20` |
-| pnpm | 9.x | `npm install -g pnpm@latest` |
+| npm | 10.x+ | Bundled with Node.js |
 | Rust | stable (1.75+) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | soroban-cli | latest | `cargo install --locked soroban-cli` |
 | Docker Desktop | latest | https://www.docker.com/products/docker-desktop |
@@ -53,7 +53,7 @@ git clone https://github.com/your-org/titip-protocol.git
 cd titip-protocol
 
 # Install all workspace dependencies
-pnpm install
+npm install
 
 # Verify workspace structure
 ls apps/        # web  oracle
@@ -76,7 +76,7 @@ titip-protocol/
 ├── plan.md
 ├── instruction.md
 ├── claude.md
-└── pnpm-workspace.yaml
+└── package.json              # npm workspaces config
 ```
 
 ---
@@ -130,10 +130,10 @@ openssl rand -hex 32
 
 ```bash
 # Start PostgreSQL + Redis in background
-docker compose up -d db redis
+# docker compose up -d db redis  (if Docker is available)
 
 # Verify containers are healthy
-docker compose ps
+# docker compose ps  (if Docker is available)
 ```
 
 ### `docker-compose.yml`
@@ -208,13 +208,13 @@ Use TablePlus, DBeaver, or Postico:
 cd packages/db
 
 # Generate Prisma client
-pnpm prisma generate
+npx prisma generate
 
 # Run migrations (creates all tables)
-pnpm prisma migrate dev --name init
+npx prisma migrate dev --name init
 
 # (Optional) Open Prisma Studio for visual inspection
-pnpm prisma studio
+npx prisma studio
 # Opens at http://localhost:5555
 ```
 
@@ -222,7 +222,7 @@ pnpm prisma studio
 
 ```bash
 # Seed 2 test users, 1 funded escrow, 1 shipped escrow
-pnpm prisma db seed
+npx prisma db seed
 ```
 
 Seed file is at `packages/db/prisma/seed.ts`. Edit to add more test scenarios.
@@ -330,7 +330,7 @@ soroban contract invoke \
 cd apps/web
 
 # Start development server
-pnpm dev
+npm run dev
 # App runs at http://localhost:3000
 ```
 
@@ -338,11 +338,11 @@ pnpm dev
 
 ```bash
 # Initialize shadcn (run once)
-pnpm dlx shadcn-ui@latest init
+npx shadcn-ui@latest init
 # Choose: TypeScript ✓, Default style, Slate color, CSS variables ✓
 
 # Install all required components
-pnpm dlx shadcn-ui@latest add button card badge dialog sheet \
+npx shadcn-ui@latest add button card badge dialog sheet \
   form input label select textarea alert alert-dialog toast \
   tabs separator skeleton dropdown-menu avatar progress \
   tooltip popover command
@@ -381,10 +381,10 @@ content: [
 cd apps/oracle
 
 # Start oracle in dev mode (watches for changes)
-pnpm dev
+npm run dev
 
 # Or start via Docker
-docker compose up oracle
+# docker compose up oracle  (if Docker is available)
 ```
 
 ### Inspect the Job Queue (Bull Board)
@@ -538,7 +538,7 @@ curl -X POST http://localhost:3000/api/oracle/confirm \
 
 ### Step 6 — Verify Resolution
 
-Check in Prisma Studio (`pnpm prisma studio`) that:
+Check in Prisma Studio (`npx prisma studio`) that:
 - `escrows.status` = `DELIVERED`
 - `escrows.delivered_at` is set
 - `escrows.tx_hash_release` is set
@@ -551,19 +551,19 @@ Check on Stellar Expert that the USDC transfer from contract → seller appears.
 
 ```bash
 # All tests across all packages
-pnpm test
+npm test
 
 # Smart contract tests (Rust)
 cd packages/contracts && cargo test -- --nocapture
 
 # API route tests (Jest)
-cd apps/web && pnpm test
+cd apps/web && npm test
 
 # E2E tests (Playwright)
-cd apps/web && pnpm test:e2e
+cd apps/web && npm run test:e2e
 
 # Watch mode for active development
-cd apps/web && pnpm test --watch
+cd apps/web && npm test -- --watch
 ```
 
 ---
@@ -580,7 +580,7 @@ cd apps/web && pnpm test --watch
 | `WASM build error: linker not found` | Missing `wasm32` target | `rustup target add wasm32-unknown-unknown` |
 | `soroban-cli: command not found` | cargo bin not in PATH | `export PATH="$HOME/.cargo/bin:$PATH"` |
 | `Docker port 5432 already in use` | Local Postgres running | `sudo lsof -i :5432` → kill the process |
-| `Prisma migration conflict` | Schema changed without migrate | `pnpm prisma migrate reset` (⚠️ deletes data) |
+| `Prisma migration conflict` | Schema changed without migrate | `npx prisma migrate reset` (⚠️ deletes data) |
 | `JWT malformed / expired` | Cookie expired or wrong secret | Clear cookies; check `JWT_SECRET` matches in env |
 | `contract invoke: insufficient funds` | Test account out of XLM | Refund via Friendbot |
 | `Error: Contract not initialized` | `initialize()` not called | Re-run soroban contract invoke for `initialize` |
@@ -607,7 +607,7 @@ vercel env add JWT_SECRET production
 
 Vercel Build Settings:
 - Root Directory: `apps/web`
-- Build Command: `pnpm build`
+- Build Command: `npm run build`
 - Output Directory: `.next`
 
 ### Oracle Service → Railway
@@ -616,10 +616,10 @@ Vercel Build Settings:
 # apps/oracle/Dockerfile
 FROM node:20-alpine
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
-RUN pnpm build
+RUN npm run build
 CMD ["node", "dist/index.js"]
 ```
 
@@ -630,7 +630,7 @@ On Railway: new project → Deploy from GitHub → select `apps/oracle` as root 
 1. Create project at `supabase.com`
 2. Copy the connection string (Project Settings → Database → Connection String → URI mode)
 3. Replace `DATABASE_URL` in Vercel and Railway with Supabase URI
-4. Run migrations: `pnpm prisma migrate deploy`
+4. Run migrations: `npx prisma migrate deploy`
 
 ### Contract → Stellar Mainnet
 
@@ -656,17 +656,17 @@ soroban contract deploy \
 
 ```bash
 # ── Development ──────────────────────────────────────────
-pnpm install                          # Install all workspace deps
-docker compose up -d db redis         # Start DB + Redis
-pnpm dev                              # Start Next.js dev server
-cd apps/oracle && pnpm dev            # Start oracle service
+npm install                           # Install all workspace deps
+# docker compose up -d db redis       # Start DB + Redis (if Docker available)
+npm run dev                           # Start Next.js dev server
+cd apps/oracle && npm run dev         # Start oracle service
 
 # ── Database ─────────────────────────────────────────────
-pnpm prisma generate                  # Regenerate Prisma client
-pnpm prisma migrate dev --name <x>    # Create + apply migration
-pnpm prisma db seed                   # Seed test data
-pnpm prisma studio                    # Open DB GUI at :5555
-pnpm prisma migrate reset             # ⚠️ Reset DB (destroys data)
+npx prisma generate                   # Regenerate Prisma client
+npx prisma migrate dev --name <x>     # Create + apply migration
+npx prisma db seed                    # Seed test data
+npx prisma studio                     # Open DB GUI at :5555
+npx prisma migrate reset              # ⚠️ Reset DB (destroys data)
 
 # ── Soroban Contract ─────────────────────────────────────
 cargo build --target wasm32-unknown-unknown --release
@@ -681,12 +681,12 @@ soroban keys show <name>              # Get secret key
 curl "https://friendbot.stellar.org?addr=<ADDRESS>"  # Fund account
 
 # ── Testing ──────────────────────────────────────────────
-pnpm test                             # All tests
+npm test                              # All tests
 cd packages/contracts && cargo test   # Contract tests only
-cd apps/web && pnpm test:e2e          # Playwright E2E
+cd apps/web && npm run test:e2e       # Playwright E2E
 
 # ── Deployment ───────────────────────────────────────────
 vercel deploy                         # Deploy Next.js to Vercel
 vercel deploy --prod                  # Production deployment
-pnpm prisma migrate deploy            # Apply migrations to prod DB
+npx prisma migrate deploy             # Apply migrations to prod DB
 ```

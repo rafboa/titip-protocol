@@ -87,7 +87,7 @@ titip-protocol/
 | Docker Compose | Local dev environment (DB, Redis, oracle service) |
 | Vercel | Next.js deployment |
 | Railway | Oracle service + PostgreSQL deployment |
-| pnpm workspaces | Monorepo package management |
+| npm workspaces | Monorepo package management |
 | v0.dev | Rapid shadcn component prototyping |
 | Claude (Anthropic) | Primary AI for code generation and review |
 
@@ -232,7 +232,7 @@ const client = new PrismaClient()  // don't instantiate in components; use share
 
 - **Never use raw SQL** unless Prisma cannot express the query (complex CTEs are the exception).
 - **Always use `prisma.$transaction()`** for multi-table writes.
-- **Migration naming:** `pnpm prisma migrate dev --name describe_change_in_snake_case`.
+- **Migration naming:** `npx prisma migrate dev --name describe_change_in_snake_case`.
 - **Never import Prisma client in client-side code** — DB access only via Server Actions or API Route Handlers.
 - **Never commit `schema.prisma` changes without a corresponding migration file.**
 
@@ -295,7 +295,7 @@ await prisma.oracleEvent.create({
 - **Generate TypeScript types for every API response and Stellar transaction result.** Never return `any` from an API route.
 - **Add `// TODO(mainnet):` comments** for anything that needs verification before mainnet deployment (asset issuers, RPC URLs, fee amounts).
 - **Include error handling for all three Freighter failure modes** in every transaction-building function: not installed, user rejected, network mismatch.
-- **Check if Prisma schema changes require a migration** before writing query code. If the model doesn't exist yet, note that `pnpm prisma migrate dev` must be run.
+- **Check if Prisma schema changes require a migration** before writing query code. If the model doesn't exist yet, note that `npx prisma migrate dev` must be run.
 - **Wrap every Soroban RPC call in try/catch** with specific error type handling (`SorobanRpc.Api.SimulateTransactionErrorResponse`, network timeout, contract panic).
 - **Suggest shadcn/ui components first** before suggesting custom implementations. Reach for `Dialog`, `Sheet`, `Alert`, `Toast`, `Badge` before writing custom markup.
 - **Use `Server Actions` for mutations** — not client-side `fetch()` calls to API routes.

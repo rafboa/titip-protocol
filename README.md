@@ -26,23 +26,24 @@ Titip Protocol protects buyers and sellers in informal Indonesian e-commerce (Wh
 # 1. Clone and install
 git clone https://github.com/your-org/titip-protocol.git
 cd titip-protocol
-pnpm install
+npm install
 
 # 2. Start infrastructure (PostgreSQL + Redis)
-docker compose up -d
+# If you have Docker installed: docker compose up -d
+# Otherwise, use a cloud-hosted PostgreSQL + Redis
 
 # 3. Set up environment
 cp .env.example .env.local
 # Edit .env.local with your values (see Environment section below)
 
 # 4. Run database migrations
-cd packages/db && pnpm db:migrate && cd ../..
+npm --prefix packages/db run db:push
 
 # 5. Generate Prisma client
-cd packages/db && pnpm db:generate && cd ../..
+npm --prefix packages/db run db:generate
 
 # 6. Start the dev server
-cd apps/web && pnpm dev
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and connect with Freighter.
@@ -171,10 +172,10 @@ npm run demo:confirm
 
 ```bash
 # Run the web app in development
-cd apps/web && pnpm dev
+npm run dev
 
 # Run database studio (GUI)
-cd packages/db && pnpm db:studio
+npm --prefix packages/db run db:studio
 
 # Build the Soroban contract
 cd packages/contracts && cargo build --target wasm32-unknown-unknown --release
