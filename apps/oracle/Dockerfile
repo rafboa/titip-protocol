@@ -5,21 +5,21 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Dependencies are installed with npm (no pnpm needed)
 
 # Copy all source
 COPY . .
 
 # Install all workspace deps
-RUN pnpm install --frozen-lockfile
+RUN npm ci
 
 # Generate Prisma client
 WORKDIR /app/packages/db
-RUN pnpm exec prisma generate
+RUN npx prisma generate
 
 # Build oracle TypeScript
 WORKDIR /app/apps/oracle
-RUN pnpm build
+RUN npm run build
 
 # ── Stage 3: runtime ─────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime

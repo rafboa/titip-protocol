@@ -5,7 +5,7 @@
  *   create-escrow (DB only) → fund (DB only) → submit tracking → oracle confirm → DELIVERED
  *
  * Uses the internal API routes directly (no Freighter, no on-chain signing).
- * Requires: docker compose up -d, pnpm dev (web), and .env.local populated.
+ * Requires: npm run dev (web) and .env.local populated.
  *
  * Run: npx tsx scripts/simulate-lifecycle.ts
  *       — or —

@@ -2,7 +2,7 @@
  * packages/db/prisma/seed.ts
  *
  * Seeds the local dev database with test users and escrows.
- * Run with: pnpm prisma db seed
+ * Run with: npx prisma db seed
  */
 
 import { PrismaClient, EscrowStatus, CourierCode } from '@prisma/client'
