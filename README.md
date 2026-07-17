@@ -29,7 +29,8 @@ cd titip-protocol
 npm install
 
 # 2. Start infrastructure (PostgreSQL + Redis)
-# If you have Docker installed: docker compose up -d
+# If you have Docker installed: 
+docker compose up -d
 # Otherwise, use a cloud-hosted PostgreSQL + Redis
 
 # 3. Set up environment

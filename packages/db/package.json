@@ -14,7 +14,7 @@
     "seed": "node --import tsx/esm prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "6.19.3"
+    "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
     "prisma": "6.19.3",
