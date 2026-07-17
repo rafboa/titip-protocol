@@ -10,8 +10,8 @@
   "scripts": {
     "dev": "npm --prefix apps/web run dev",
     "build": "npm --prefix apps/web run build",
-    "vercel-build": "npm --prefix packages/db install @prisma/client@6.19.3 && npm --prefix packages/db run db:generate && npm --prefix apps/web run build",
-    "setup": "npm --prefix packages/db run db:generate && npm --prefix packages/db run db:push && echo Setup complete!",
+    "vercel-build": "cd packages/db && npm install @prisma/client@6.19.3 && npx prisma generate && cd ../.. && npm --prefix apps/web run build",
+    "setup": "cd packages/db && npx prisma generate && npx prisma db push && cd ../.. && echo Setup complete!",
     "demo:deploy": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-contract.ts",
     "demo:sac": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-usdc-sac.ts",
     "demo:fund": "npx dotenv-cli -e .env.local -- npx tsx scripts/fund-testnet-accounts.ts",
