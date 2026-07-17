@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "npm --prefix ../../packages/db install @prisma/client@6.19.3 && npm --prefix ../../packages/db run db:generate && next build",
+    "build": "cd ../../packages/db && npm install @prisma/client@6.19.3 && npx prisma generate && cd ../../apps/web && next build",
     "start": "next start",
     "lint": "next lint"
   },
