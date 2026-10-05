@@ -42,22 +42,22 @@ MOTION:  1  (Hover states and page transitions only — no parallax, no perpetua
 
 | Token         | Value       | Role                                                          |
 |---------------|-------------|---------------------------------------------------------------|
-| `--primary`   | `#4F46E5`   | Indigo. Primary CTAs, active states, focused inputs.          |
+| `--primary`   | `#2563EB`   | Blue. Primary CTAs, active states, focused inputs.          |
 | `--secondary` | `#06B6D4`   | Cyan. Secondary accent, informational highlights.             |
 | `--success`   | `#10B981`   | Emerald. Delivery confirmed, escrow completed, funded state.  |
 | `--warning`   | `#F59E0B`   | Amber. Pending states, timeout approaching.                   |
 | `--danger`    | `#EF4444`   | Red. Refund, dispute, expired, error states.                  |
 
-**Why indigo primary:** indigo sits between blue (trust, banking) and purple (crypto/digital) without falling into the "generic blue-purple gradient" trap. It is a single solid color used at specific interaction points, not a gradient wash. The secondary cyan provides contrast for informational elements without competing for attention.
+**Why blue primary:** Blue (#2563EB) conveys trust, stability, and aligns with fintech standards (banking/escrow) while avoiding the crypto "generic blue-purple gradient" trap. It is a single solid color used at specific interaction points, not a gradient wash. The secondary cyan provides contrast for informational elements without competing for attention.
 
-**Palette cap:** 2 core colors (indigo + slate neutrals) + 1 accent (cyan) + 3 semantic status colors (success/warning/danger). Status colors are never decorative — each maps to a real escrow state.
+**Palette cap:** 2 core colors (blue + slate neutrals) + 1 accent (cyan) + 3 semantic status colors (success/warning/danger). Status colors are never decorative — each maps to a real escrow state.
 
 ### Status Color Mapping
 
 | Escrow State | Color       | Token          |
 |-------------|-------------|----------------|
 | Pending     | Amber       | `--warning`    |
-| Funded      | Indigo      | `--primary`    |
+| Funded      | Blue        | `--primary`    |
 | Shipped     | Cyan        | `--secondary`  |
 | Delivered   | Emerald     | `--success`    |
 | Refunded    | Red         | `--danger`     |

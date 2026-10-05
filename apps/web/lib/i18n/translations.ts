@@ -9,12 +9,13 @@ export const translations = {
   en: {
     nav: {
       dashboard: 'Dashboard',
+      settings: 'Settings',
+      wallet: 'Wallet',
       connectWallet: 'Connect Wallet',
       connectShort: 'Connect',
       disconnect: 'Disconnect',
     },
     landing: {
-      badge: 'Powered by Soroban on Stellar',
       titlePrefix: 'Decentralized Escrow for',
       titleHighlight: 'QRIS Payments',
       subtitle:
@@ -26,8 +27,13 @@ export const translations = {
       feature2Title: 'Decentralized Oracle',
       feature2Body:
         'Our custom oracle automatically polls courier APIs and triggers smart contract payouts upon delivery.',
-      feature3Title: 'Seamless QRIS',
+      feature3Title: 'QRIS Integration',
       feature3Body: 'Instantly parse any standard Indonesian QRIS invoice into an immutable smart contract agreement.',
+      howTitle: 'How it works',
+      step1: 'Scan or paste the seller QRIS code',
+      step2: 'Lock USDC in the smart contract',
+      step3: 'Seller ships, oracle tracks the courier',
+      step4: 'Delivery confirmed, funds released',
     },
     dashboard: {
       title: 'Your Escrows',
@@ -104,8 +110,10 @@ export const translations = {
     },
     connectWallet: {
       title: 'Connect Wallet',
-      subtitle: 'Sign in with Freighter to access Titip Protocol',
-      connectFreighter: 'Connect Freighter',
+      subtitle: 'Sign in to access Titip Protocol',
+      connectFreighter: 'Connect Freighter (Browser Extension)',
+      connectWalletConnect: 'WalletConnect (Mobile Wallets)',
+      walletConnectComingSoon: 'WalletConnect v2 integration requires a Project ID and is scheduled for the v2.0 roadmap.',
       sep10: 'SEP-10 Secure Authentication',
     },
     connectSteps: {
@@ -128,6 +136,19 @@ export const translations = {
       SHIPPED: 'Shipped',
       DELIVERED: 'Delivered',
       REFUNDED: 'Refunded',
+      DISPUTED: 'Disputed',
+    },
+    dispute: {
+      openDispute: 'Open Dispute',
+      submitting: 'Disputing...',
+      disputedTitle: 'Escrow Disputed',
+      disputedNotice: 'This escrow is currently disputed. Our admin arbiter is reviewing evidence from buyer and seller.',
+    },
+    fund: {
+      awaitingFunding: 'Awaiting Funding',
+      awaitingFundingBody: 'This escrow was created on-chain but has not been funded with {{amount}} USDC yet. Click below to sign the transfer with Freighter and lock the funds securely.',
+      signFund: 'Sign & Fund Escrow',
+      funding: 'Funding Escrow...',
     },
     courier: {
       JNT: 'J&T Express',
@@ -141,16 +162,42 @@ export const translations = {
       WRONG_NETWORK: 'Please switch Freighter to {{network}}.',
       REJECTED: 'Transaction was rejected in Freighter.',
     },
+    notifications: {
+      title: 'Notifications',
+      markAllRead: 'Mark all as read',
+      empty: 'No notifications yet',
+      recentShown: '{{count}} recent notifications shown',
+    },
+    settings: {
+      title: 'Settings',
+      subtitle: 'Wallet and network configuration',
+      walletSection: 'Wallet',
+      addressLabel: 'Stellar Address',
+      networkLabel: 'Network',
+      languageSection: 'Language',
+      disconnectLabel: 'Disconnect wallet',
+      disconnectBtn: 'Disconnect',
+    },
+    wallet: {
+      title: 'Wallet',
+      subtitle: 'Manage your USDC balance via TEMPO',
+      balanceTitle: 'USDC Balance',
+      depositBtn: 'Deposit (IDR to USDC)',
+      withdrawBtn: 'Withdraw (USDC to IDR)',
+      tempoInfo: 'Transactions are processed securely by TEMPO EU, a regulated Stellar anchor.',
+      interactiveModalTitle: 'TEMPO On-Ramp',
+    },
   },
   id: {
     nav: {
       dashboard: 'Dasbor',
+      settings: 'Pengaturan',
+      wallet: 'Dompet',
       connectWallet: 'Hubungkan Dompet',
       connectShort: 'Hubungkan',
       disconnect: 'Putuskan koneksi',
     },
     landing: {
-      badge: 'Didukung Soroban di Stellar',
       titlePrefix: 'Escrow Terdesentralisasi untuk',
       titleHighlight: 'Pembayaran QRIS',
       subtitle:
@@ -162,8 +209,13 @@ export const translations = {
       feature2Title: 'Oracle Terdesentralisasi',
       feature2Body:
         'Oracle kami memantau API kurir secara otomatis dan memicu pencairan dana lewat smart contract saat paket terkirim.',
-      feature3Title: 'QRIS Tanpa Ribet',
+      feature3Title: 'Integrasi QRIS',
       feature3Body: 'Ubah struk QRIS Indonesia standar apa pun menjadi perjanjian smart contract secara instan.',
+      howTitle: 'Cara kerja',
+      step1: 'Scan atau tempel kode QRIS penjual',
+      step2: 'Kunci USDC dalam smart contract',
+      step3: 'Penjual kirim, oracle lacak kurir',
+      step4: 'Pengiriman terkonfirmasi, dana dicairkan',
     },
     dashboard: {
       title: 'Escrow Anda',
@@ -240,8 +292,10 @@ export const translations = {
     },
     connectWallet: {
       title: 'Hubungkan Dompet',
-      subtitle: 'Masuk dengan Freighter untuk mengakses Titip Protocol',
-      connectFreighter: 'Hubungkan Freighter',
+      subtitle: 'Masuk untuk mengakses Titip Protocol',
+      connectFreighter: 'Hubungkan Freighter (Ekstensi Browser)',
+      connectWalletConnect: 'WalletConnect (Dompet Mobile)',
+      walletConnectComingSoon: 'Integrasi WalletConnect v2 membutuhkan ID Proyek dan dijadwalkan pada roadmap v2.0.',
       sep10: 'Autentikasi Aman SEP-10',
     },
     connectSteps: {
@@ -264,6 +318,19 @@ export const translations = {
       SHIPPED: 'Dikirim',
       DELIVERED: 'Terkirim',
       REFUNDED: 'Dikembalikan',
+      DISPUTED: 'Disengketakan',
+    },
+    dispute: {
+      openDispute: 'Ajukan Sengketa',
+      submitting: 'Memproses Sengketa...',
+      disputedTitle: 'Escrow Disengketakan',
+      disputedNotice: 'Escrow ini sedang dalam status sengketa. Arbiter admin kami sedang meninjau bukti dari pembeli dan penjual.',
+    },
+    fund: {
+      awaitingFunding: 'Menunggu Pendanaan',
+      awaitingFundingBody: 'Escrow ini telah dibuat di blockchain tetapi belum didanai sebesar {{amount}} USDC. Klik di bawah untuk menandatangani transfer dengan Freighter dan mengunci dana secara aman.',
+      signFund: 'Tanda Tangani & Danai Escrow',
+      funding: 'Mendanai Escrow...',
     },
     courier: {
       JNT: 'J&T Express',
@@ -276,6 +343,31 @@ export const translations = {
       NOT_INSTALLED: 'Dompet Freighter tidak terdeteksi atau koneksi ditolak.',
       WRONG_NETWORK: 'Silakan alihkan Freighter ke jaringan {{network}}.',
       REJECTED: 'Transaksi ditolak di Freighter.',
+    },
+    notifications: {
+      title: 'Notifikasi',
+      markAllRead: 'Tandai semua terbaca',
+      empty: 'Belum ada notifikasi',
+      recentShown: '{{count}} notifikasi terbaru ditampilkan',
+    },
+    settings: {
+      title: 'Pengaturan',
+      subtitle: 'Konfigurasi dompet dan jaringan',
+      walletSection: 'Dompet',
+      addressLabel: 'Alamat Stellar',
+      networkLabel: 'Jaringan',
+      languageSection: 'Bahasa',
+      disconnectLabel: 'Putuskan dompet',
+      disconnectBtn: 'Putuskan',
+    },
+    wallet: {
+      title: 'Dompet',
+      subtitle: 'Kelola saldo USDC Anda melalui TEMPO',
+      balanceTitle: 'Saldo USDC',
+      depositBtn: 'Deposit (IDR ke USDC)',
+      withdrawBtn: 'Tarik (USDC ke IDR)',
+      tempoInfo: 'Transaksi diproses secara aman oleh TEMPO EU, anchor Stellar yang teregulasi.',
+      interactiveModalTitle: 'Top Up TEMPO',
     },
   },
 } as const satisfies Record<Locale, unknown>

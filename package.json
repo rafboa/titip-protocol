@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm --prefix apps/web run dev",
     "build": "npm --prefix apps/web run build",
+    "build:contract": "cd packages/contracts && cargo build --target wasm32v1-none --release",
     "vercel-build": "cd packages/db && npm install @prisma/client@6.19.3 && npx prisma generate && cd ../.. && npm --prefix apps/web run build",
     "setup": "cd packages/db && npx prisma generate && npx prisma db push && cd ../.. && echo Setup complete!",
     "demo:deploy": "npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-contract.ts",
@@ -19,7 +20,7 @@
     "demo:simulate": "npx dotenv-cli -e .env.local -- npx tsx scripts/simulate-lifecycle.ts",
     "demo:confirm": "npx dotenv-cli -e .env.local -- npx tsx scripts/demo-oracle-confirm.ts",
     "demo:verify": "npx dotenv-cli -e .env.local -- npx tsx scripts/verify-onchain-lifecycle.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm --prefix apps/web run test"
   },
   "keywords": [],
   "author": "",

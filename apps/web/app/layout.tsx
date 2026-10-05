@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: 'Titip Protocol',
   description:
     'Decentralized QRIS escrow on Stellar — trustless payments between Indonesian buyers and sellers, powered by Soroban smart contracts.',
+  manifest: '/manifest.json',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -94,9 +94,20 @@ export function ConnectWalletCard({ onSuccess }: { onSuccess?: () => void }) {
       )}
 
       {step === 'IDLE' ? (
-        <Button className="w-full" onClick={handleConnect}>
-          {t('connectWallet.connectFreighter')}
-        </Button>
+        <div className="flex flex-col gap-3">
+          <Button className="w-full" onClick={handleConnect}>
+            {t('connectWallet.connectFreighter')}
+          </Button>
+          <Button 
+            variant="outline" 
+            className="w-full" 
+            onClick={() => {
+              setError(t('connectWallet.walletConnectComingSoon'))
+            }}
+          >
+            {t('connectWallet.connectWalletConnect')}
+          </Button>
+        </div>
       ) : (
         <div className="flex flex-col items-center gap-4 py-4">
           <Loader2 size={32} className="text-primary animate-spin" />

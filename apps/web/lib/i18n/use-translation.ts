@@ -16,12 +16,12 @@ export function useTranslation() {
   const locale = useLocaleStore((s) => s.locale);
   const setLocale = useLocaleStore((s) => s.setLocale);
 
-  function t(path: string, vars?: Record<string, string>): string {
+  function t(path: string, vars?: Record<string, string | number>): string {
     const value = resolve(translations[locale], path);
     if (typeof value !== 'string') return path;
     if (!vars) return value;
     return Object.entries(vars).reduce(
-      (str, [key, val]) => str.replaceAll(`{{${key}}}`, val),
+      (str, [key, val]) => str.replaceAll(`{{${key}}}`, String(val)),
       value
     );
   }

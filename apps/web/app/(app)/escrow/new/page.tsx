@@ -93,7 +93,6 @@ export default function CreateEscrowPage() {
         qrisSessionId: parsedData.sessionId,
       };
 
-      // 1. Build the unsigned create_escrow() transaction
       setCreateStep('CREATE');
       const createRes = await fetch('/api/escrow/create', {
         method: 'POST',
@@ -107,12 +106,10 @@ export default function CreateEscrowPage() {
       const createData = await createRes.json();
       if (!createRes.ok) throw new Error(createData.error || 'Failed to build create transaction');
 
-      // 2. Buyer signs create_escrow() — required since the contract enforces
-      //    buyer.require_auth(). Network guard runs inside signTx().
+      // Contract enforces buyer.require_auth() on escrow creation
       const signedCreateXdr = await signTx(createData.createTxXdr);
 
-      // 3. Submit the signed create tx; the server reads back the real
-      //    contract-assigned escrow ID and returns the unsigned fund() XDR.
+      // Server extracts canonical on-chain escrow ID from contract return value
       const confirmRes = await fetch('/api/escrow/confirm', {
         method: 'POST',
         headers: {
@@ -127,11 +124,9 @@ export default function CreateEscrowPage() {
 
       const { escrowId, unsignedFundXdr } = confirmData;
 
-      // 4. Buyer signs fund()
       setCreateStep('FUND');
       const signedFundXdr = await signTx(unsignedFundXdr);
 
-      // 5. Submit the signed fund tx; the server verifies it on-chain
       const fundRes = await fetch(`/api/escrow/${escrowId}/fund`, {
         method: 'POST',
         headers: {

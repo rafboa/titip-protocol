@@ -1,16 +1,9 @@
 'use strict'
 
-// =============================================================================
-// QRIS EMVCo TLV Parser
-// Parses Indonesian QRIS (Quick Response Code Indonesian Standard) payloads
-// conforming to the EMVCo QR Code Specification for Payment Systems.
-//
-// Reference: EMVCo QR Code Specification for Payment Systems (Merchant-Presented Mode)
-// =============================================================================
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+/**
+ * QRIS EMVCo TLV Parser
+ * Parses Indonesian QRIS payloads conforming to EMVCo Merchant-Presented Mode.
+ */
 
 /** A single parsed Tag-Length-Value element from the EMVCo payload. */
 export interface QrisTag {
@@ -44,10 +37,6 @@ export interface QrisParseResult {
   error: string | null
 }
 
-// ---------------------------------------------------------------------------
-// CRC16-CCITT
-// ---------------------------------------------------------------------------
-
 /**
  * Compute CRC16-CCITT (polynomial 0x1021, initial value 0xFFFF).
  *
@@ -71,10 +60,6 @@ export function computeCrc16(data: string): string {
 
   return crc.toString(16).toUpperCase().padStart(4, '0')
 }
-
-// ---------------------------------------------------------------------------
-// TLV parsing helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a TLV-encoded string into an array of {@link QrisTag} elements.
@@ -177,33 +162,17 @@ function parseMerchantSubTlv(value: string): QrisMerchantInfo {
   return { globalId, merchantId, merchantCriteria }
 }
 
-// ---------------------------------------------------------------------------
-// Tag number helpers
-// ---------------------------------------------------------------------------
-
 /** Returns true if the tag number (as decimal int) is in the merchant account range 26-45. */
 function isMerchantAccountTag(tag: string): boolean {
   const n = parseInt(tag, 10)
   return n >= 26 && n <= 45
 }
 
-// ---------------------------------------------------------------------------
-// Main parser
-// ---------------------------------------------------------------------------
-
 /** Minimum realistic payload length: tag 00 (6 chars) + CRC tag 63 (8 chars) = 14 */
 const MIN_PAYLOAD_LENGTH = 14
 
 /**
  * Parse a QRIS (EMVCo) payload string and return a structured result.
- *
- * Steps:
- * 1. Trim whitespace.
- * 2. Validate minimum length.
- * 3. Parse all top-level TLV tags.
- * 4. For tags 26-45, parse sub-TLVs to extract merchant info.
- * 5. Validate CRC16-CCITT (tag 63).
- * 6. Return structured {@link QrisParseResult}.
  */
 export function parseQris(payload: string): QrisParseResult {
   const trimmed = payload.trim()
@@ -226,7 +195,6 @@ export function parseQris(payload: string): QrisParseResult {
     error,
   })
 
-  // ---- Step 1: Basic validation ----
   if (trimmed.length === 0) {
     return errorResult('Empty payload')
   }
@@ -237,7 +205,6 @@ export function parseQris(payload: string): QrisParseResult {
     )
   }
 
-  // ---- Step 2: Parse top-level TLV ----
   let topLevelTags: QrisTag[]
   try {
     topLevelTags = parseTlv(trimmed, 'top-level')
@@ -250,9 +217,7 @@ export function parseQris(payload: string): QrisParseResult {
     return errorResult('No TLV tags found in payload')
   }
 
-  // ---- Step 3: Build a tag map for easy access ----
-  // Use Map to preserve insertion order; for duplicate tags, first wins
-  // (except merchant account which we scan separately).
+  // Map tags by ID (preserves first occurrence for duplicate tags)
   const tagMap = new Map<string, string>()
   for (const t of topLevelTags) {
     if (!tagMap.has(t.tag)) {
@@ -260,7 +225,7 @@ export function parseQris(payload: string): QrisParseResult {
     }
   }
 
-  // ---- Step 4: Extract merchant account info (first found in 26-45) ----
+  // Extract merchant account info from first matching tag in range 26-45
   let merchantAccountInfo: QrisMerchantInfo = {
     globalId: null,
     merchantId: null,
@@ -280,23 +245,17 @@ export function parseQris(payload: string): QrisParseResult {
     }
   }
 
-  // ---- Step 5: CRC validation ----
-  //
-  // The CRC is the last 4 hex characters of the payload.
-  // It is computed over everything before those 4 characters,
-  // which includes the "6304" tag+length prefix.
+  // CRC is the last 4 hex characters; computed over everything before those 4 characters
   let crcValid = false
   const crcTagValue = tagMap.get('63')
 
   if (crcTagValue !== undefined && crcTagValue.length === 4) {
-    // The data to checksum is everything up to (but not including) the CRC value
     const crcDataEndIndex = trimmed.length - 4
     const dataForCrc = trimmed.slice(0, crcDataEndIndex)
     const computed = computeCrc16(dataForCrc)
     crcValid = computed === crcTagValue.toUpperCase()
   }
 
-  // ---- Step 6: Point of Initiation Method ----
   let pointOfInitiation: 'static' | 'dynamic' | null = null
   const poiRaw = tagMap.get('01')
   if (poiRaw === '11') {
@@ -304,9 +263,7 @@ export function parseQris(payload: string): QrisParseResult {
   } else if (poiRaw === '12') {
     pointOfInitiation = 'dynamic'
   }
-  // v1.1: Warn if tag 01 has an unexpected value
 
-  // ---- Step 7: Build result ----
   const result: QrisParseResult = {
     isValid: crcValid,
     payloadFormatIndicator: tagMap.get('00') ?? null,

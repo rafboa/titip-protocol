@@ -28,11 +28,11 @@ const config: Config = {
         },
         secondary: {
           DEFAULT: 'var(--secondary)',
-          foreground: '#ffffff',
+          foreground: '#0B0E14',
         },
         success: {
           DEFAULT: 'var(--success)',
-          foreground: '#ffffff',
+          foreground: '#0B0E14',
         },
         warning: {
           DEFAULT: 'var(--warning)',

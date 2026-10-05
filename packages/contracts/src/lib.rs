@@ -23,6 +23,8 @@ pub enum EscrowStatus {
     Delivered,
     /// Buyer claimed refund after timeout (terminal)
     Refunded,
+    /// Transaction is disputed (v1.1 grace period / admin arbitration)
+    Disputed,
 }
 
 /// Core escrow record stored on-chain.
@@ -372,7 +374,71 @@ impl TitipEscrowContract {
     }
 
     // ------------------------------------------------------------------------
-    // claim_refund
+    // Dispute & Resolution (v1.1)
+    // ------------------------------------------------------------------------
+
+    /// Dispute an escrow transaction. Can be called by buyer or seller.
+    /// 
+    /// Transitions: FUNDED | SHIPPED -> DISPUTED.
+    pub fn dispute_escrow(env: Env, escrow_id: u64, caller: Address) -> Result<(), EscrowError> {
+        let mut escrow = Self::load_escrow(&env, escrow_id)?;
+
+        caller.require_auth();
+
+        if caller != escrow.buyer && caller != escrow.seller {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Shipped {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        escrow.status = EscrowStatus::Disputed;
+        Self::save_escrow(&env, &escrow);
+
+        log!(&env, "Escrow {} disputed by {}", escrow_id, caller);
+        env.events().publish((symbol_short!("escrow"), symbol_short!("disputed")), (escrow_id, caller));
+
+        Ok(())
+    }
+
+    /// Admin resolves a dispute by sending funds to the winner.
+    ///
+    /// Transitions: DISPUTED -> DELIVERED (if seller wins) or REFUNDED (if buyer wins).
+    pub fn resolve_dispute(env: Env, escrow_id: u64, winner: Address) -> Result<(), EscrowError> {
+        let mut escrow = Self::load_escrow(&env, escrow_id)?;
+        let config = Self::get_config(env.clone())?;
+
+        config.admin.require_auth();
+
+        if escrow.status != EscrowStatus::Disputed {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        if winner != escrow.buyer && winner != escrow.seller {
+            return Err(EscrowError::Unauthorized); // Winner must be buyer or seller
+        }
+
+        let token_client = token::Client::new(&env, &escrow.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &winner,
+            &escrow.amount,
+        );
+
+        if winner == escrow.buyer {
+            escrow.status = EscrowStatus::Refunded;
+        } else {
+            escrow.status = EscrowStatus::Delivered;
+        }
+
+        Self::save_escrow(&env, &escrow);
+
+        log!(&env, "Escrow {} dispute resolved, winner: {}", escrow_id, winner);
+        env.events().publish((symbol_short!("escrow"), symbol_short!("resolved")), (escrow_id, winner.clone(), escrow.amount));
+
+        Ok(())
+    }
     // ------------------------------------------------------------------------
 
     /// Buyer claims a refund after the timeout has passed.

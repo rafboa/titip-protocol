@@ -10,6 +10,7 @@ const STATUS_VARIANT: Record<string, BadgeProps['variant']> = {
   SHIPPED: 'secondary',
   DELIVERED: 'success',
   REFUNDED: 'destructive',
+  DISPUTED: 'destructive',
 };
 
 // 6px dot color per status — DESIGN.md Section 3 & 5
@@ -19,6 +20,7 @@ const STATUS_DOT: Record<string, string> = {
   SHIPPED: 'bg-secondary',
   DELIVERED: 'bg-success',
   REFUNDED: 'bg-destructive',
+  DISPUTED: 'bg-destructive',
 };
 
 export function EscrowStatusBadge({ status }: { status: string }) {

@@ -18,9 +18,9 @@
   --bg-glass: rgba(19, 26, 38, 0.6);
   --bg-glass-hover: rgba(29, 39, 56, 0.8);
 
-  --primary: #4F46E5; /* Indigo */
-  --primary-hover: #4338CA;
-  --primary-glow: rgba(79, 70, 229, 0.5);
+  --primary: #2563EB; /* Blue — trust/fintech, not purple */
+  --primary-hover: #1D4ED8;
+  --primary-glow: rgba(37, 99, 235, 0.5);
 
   --secondary: #06B6D4; /* Cyan */
 
@@ -31,7 +31,7 @@
   --text-main: #F3F4F6;
   --text-muted: #9CA3AF;
 
-  --border-glass: rgba(255, 255, 255, 0.08);
+  --border-glass: rgba(255, 255, 255, 0.22);
 
   /* Spacing & Radii */
   --radius-sm: 8px;

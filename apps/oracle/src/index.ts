@@ -48,8 +48,6 @@ async function pollShippedEscrows(): Promise<void> {
   for (const escrow of escrows) {
     if (!escrow.trackingNumber || !escrow.courierCode) continue
 
-    // Use a timestamp in jobId so if a previous job failed permanently, 
-    // we can still re-enqueue it while the escrow remains SHIPPED.
     await trackingQueue.add(
       'check-delivery',
       {
@@ -58,7 +56,9 @@ async function pollShippedEscrows(): Promise<void> {
         courierCode: escrow.courierCode,
       },
       {
-        jobId: `track-${escrow.id}-${Date.now()}`, 
+        jobId: `track-${escrow.id}`,
+        removeOnComplete: true,
+        removeOnFail: true,
       }
     )
   }

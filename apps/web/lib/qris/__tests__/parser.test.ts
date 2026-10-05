@@ -14,7 +14,7 @@ import type { QrisParseResult } from '../parser'
  * Structure breakdown:
  *   00 02 01                         → Payload Format Indicator = "01"
  *   01 02 11                         → Point of Initiation = static ("11")
- *   26 67 ...                        → Merchant Account Info (Nobubank)
+ *   26 62 ...                        → Merchant Account Info (Nobubank)
  *     00 16 COM.NOBUBANK.WWW         →   Global ID
  *     01 18 936001230000003680       →   Merchant PAN
  *     02 09 123456789                →   Merchant ID
@@ -31,17 +31,17 @@ import type { QrisParseResult } from '../parser'
  *   61 05 12340                      → Postal Code
  *   62 07 ...                        → Additional Data
  *     07 03 A01                      →   Terminal Label
- *   63 04 6FCC                       → CRC16-CCITT
+ *   63 04 2358                       → CRC16-CCITT
  */
 const VALID_QRIS =
-  '00020101021126670016COM.NOBUBANK.WWW01189360012300000036802091234567890303UMI' +
+  '00020101021126620016COM.NOBUBANK.WWW011893600123000000368002091234567890303UMI' +
   '51440014ID.CO.QRIS.WWW0215ID10200123456780303UMI' +
   '5204839953033605802ID5913TOKO BUDIANTO6007JAKARTA6105123406207' +
-  '0703A0163046FCC'
+  '0703A0163042358'
 
 /** Same structure but with a deliberately wrong CRC. */
 const INVALID_CRC_QRIS =
-  '00020101021126670016COM.NOBUBANK.WWW01189360012300000036802091234567890303UMI' +
+  '00020101021126620016COM.NOBUBANK.WWW011893600123000000368002091234567890303UMI' +
   '51440014ID.CO.QRIS.WWW0215ID10200123456780303UMI' +
   '5204839953033605802ID5913TOKO BUDIANTO6007JAKARTA6105123406207' +
   '0703A0163049A25'
@@ -50,7 +50,7 @@ const INVALID_CRC_QRIS =
 function buildDynamicQris(): string {
   // Build payload without CRC, then append computed CRC
   const body =
-    '00020101021226670016COM.NOBUBANK.WWW01189360012300000036802091234567890303UMI' +
+    '00020101021226620016COM.NOBUBANK.WWW011893600123000000368002091234567890303UMI' +
     '51440014ID.CO.QRIS.WWW0215ID10200123456780303UMI' +
     '520483995303360540550000' + // Tag 54 = amount "50000"
     '5802ID5913TOKO BUDIANTO6007JAKARTA6105123406207' +

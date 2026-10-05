@@ -92,6 +92,7 @@ enum EscrowStatus {
   SHIPPED
   DELIVERED
   REFUNDED
+  DISPUTED
 }
 
 enum CourierCode {

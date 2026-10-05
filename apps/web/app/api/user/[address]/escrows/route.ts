@@ -1,17 +1,11 @@
-// GET /api/user/:address/escrows
-// Returns all escrows where the user is buyer OR seller, sorted newest first.
-// Supports optional ?role=buyer|seller filter and ?status=PENDING|FUNDED|... filter.
-
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
+import { verifyJwt } from '@/lib/auth/sep10'
 
-// Escrow statuses matching the Prisma EscrowStatus enum
 const ESCROW_STATUSES = ['PENDING', 'FUNDED', 'SHIPPED', 'DELIVERED', 'REFUNDED'] as const
 
-/** JSON replacer that converts BigInt and Decimal to string */
 function jsonSafe(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') return value.toString()
-  // Prisma Decimal has a toFixed method
   if (value !== null && typeof value === 'object' && 'toFixed' in value) {
     return String(value)
   }
@@ -20,10 +14,29 @@ function jsonSafe(_key: string, value: unknown): unknown {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ address: string }> }
+  { params }: { params: { address: string } | Promise<{ address: string }> }
 ) {
   try {
-    const { address } = await params
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
+    const { address } = await Promise.resolve(params)
+
+    if (payload.address !== address) {
+      return NextResponse.json(
+        { error: 'Forbidden: you can only query your own escrows' },
+        { status: 403 }
+      )
+    }
     const { searchParams } = new URL(request.url)
 
     const roleFilter = searchParams.get('role')

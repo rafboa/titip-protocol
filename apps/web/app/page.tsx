@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { ShieldCheck, Zap, Globe2 } from 'lucide-react';
+import { ShieldCheck, Zap, Globe2, ScanLine, Lock, Truck, CheckCircle2 } from 'lucide-react';
 
 import { useAuthStore } from '@/lib/store/auth';
 import { useTranslation } from '@/lib/i18n/use-translation';
 import { Navbar } from '@/components/layout/navbar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 
 export default function Home() {
   const { isAuthenticated } = useAuthStore();
@@ -22,9 +21,8 @@ export default function Home() {
         {/* Hero — centered, single CTA */}
         <section className="mx-auto max-w-3xl text-center">
           <div className="animate-fade-in">
-            <Badge className="mb-4">{t('landing.badge')}</Badge>
             <h1 className="mb-6 text-5xl font-bold leading-tight tracking-tight sm:text-6xl">
-              {t('landing.titlePrefix')} <span className="text-gradient">{t('landing.titleHighlight')}</span>
+              {t('landing.titlePrefix')} <span className="text-secondary">{t('landing.titleHighlight')}</span>
             </h1>
             <p className="mb-10 text-lg leading-relaxed text-muted-foreground sm:text-xl">
               {t('landing.subtitle')}
@@ -71,6 +69,27 @@ export default function Home() {
               <h3 className="text-lg font-semibold">{t('landing.feature3Title')}</h3>
               <p className="text-sm text-muted-foreground">{t('landing.feature3Body')}</p>
             </Card>
+          </div>
+        </section>
+
+        {/* How it works — 4 steps because that is the actual escrow flow (DESIGN.md §6) */}
+        <section className="mt-24">
+          <h2 className="mb-10 text-2xl font-semibold">{t('landing.howTitle')}</h2>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { icon: ScanLine, label: t('landing.step1'), color: 'bg-primary/10 text-primary', num: '01' },
+              { icon: Lock,     label: t('landing.step2'), color: 'bg-warning/10 text-warning',  num: '02' },
+              { icon: Truck,    label: t('landing.step3'), color: 'bg-secondary/10 text-secondary', num: '03' },
+              { icon: CheckCircle2, label: t('landing.step4'), color: 'bg-success/10 text-success', num: '04' },
+            ].map(({ icon: Icon, label, color, num }) => (
+              <div key={num} className="flex flex-col gap-3">
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${color}`}>
+                  <Icon size={22} />
+                </div>
+                <div className="font-mono text-xs text-muted-foreground">{num}</div>
+                <p className="text-sm font-medium leading-snug">{label}</p>
+              </div>
+            ))}
           </div>
         </section>
       </main>

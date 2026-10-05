@@ -9,7 +9,9 @@ import {
   BASE_FEE,
   xdr,
   Address,
+  Account,
   nativeToScVal,
+  scValToNative,
   rpc,
 } from '@stellar/stellar-sdk'
 import { STELLAR_CONFIG } from '../config'
@@ -180,6 +182,83 @@ export async function buildClaimRefundTx(
 }
 
 /**
+ * Build an unsigned `dispute_escrow` transaction for the buyer or seller to sign.
+ */
+export async function buildDisputeEscrowTx(
+  userAddress: string,
+  contractEscrowId: bigint
+): Promise<string> {
+  const contract = getContract()
+  const account = await server.getAccount(userAddress)
+
+  const tx = new TransactionBuilder(account, {
+    fee: String(Number(BASE_FEE) * STELLAR_CONFIG.feeMultiplier),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        'dispute_escrow',
+        nativeToScVal(contractEscrowId, { type: 'u64' }),
+        new Address(userAddress).toScVal()
+      )
+    )
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(
+      `Simulation failed: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`
+    )
+  }
+
+  const assembled = rpc.assembleTransaction(tx, simulated).build()
+  return assembled.toXDR()
+}
+
+/**
+ * Build, sign, and submit the `resolve_dispute` transaction using the admin's secret key.
+ */
+export async function submitResolveDisputeTx(
+  contractEscrowId: bigint,
+  adminSecretKey: string,
+  winnerAddress: string
+): Promise<string> {
+  const contract = getContract()
+  const adminKeypair = Keypair.fromSecret(adminSecretKey)
+  const account = await server.getAccount(adminKeypair.publicKey())
+
+  const tx = new TransactionBuilder(account, {
+    fee: String(Number(BASE_FEE) * STELLAR_CONFIG.feeMultiplier),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        'resolve_dispute',
+        nativeToScVal(contractEscrowId, { type: 'u64' }),
+        new Address(winnerAddress).toScVal()
+      )
+    )
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(
+      `Simulation failed: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`
+    )
+  }
+
+  const assembled = rpc.assembleTransaction(tx, simulated).build()
+  assembled.sign(adminKeypair)
+  
+  const result = await submitAndAwait(assembled.toXDR())
+  return result.hash
+}
+
+/**
  * Submit a signed transaction XDR to the Stellar network and wait for it to
  * land. Returns the RPC getTransaction() success response (includes hash and
  * the contract's return value, if any).
@@ -293,4 +372,64 @@ export async function submitCreateEscrowTx(
 export async function getCurrentLedger(): Promise<number> {
   const result = await server.getLatestLedger()
   return result.sequence
+}
+
+export type OnChainEscrow = {
+  escrowId: bigint
+  buyer: string
+  seller: string
+  amount: bigint
+  status: 'Pending' | 'Funded' | 'Shipped' | 'Delivered' | 'Refunded' | 'Disputed'
+  timeoutLedger: number
+  trackingNumber: string
+  courierCode: string
+}
+
+/**
+ * Fetch and decode the canonical on-chain escrow state from Soroban RPC.
+ */
+export async function getOnChainEscrow(contractEscrowId: bigint): Promise<OnChainEscrow> {
+  const contract = getContract()
+  const dummyAccount = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0')
+
+  const tx = new TransactionBuilder(dummyAccount, {
+    fee: String(BASE_FEE),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(
+      contract.call('get_escrow', nativeToScVal(contractEscrowId, { type: 'u64' }))
+    )
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation error: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`)
+  }
+
+  const simSuccess = simulated as rpc.Api.SimulateTransactionSuccessResponse
+  if (!simSuccess.result?.retval) {
+    throw new Error(`Escrow ${contractEscrowId} not found on chain`)
+  }
+
+  const native = scValToNative(simSuccess.result.retval)
+  const statusRaw = native.status
+  let statusStr = 'Pending'
+  if (typeof statusRaw === 'string') {
+    statusStr = statusRaw
+  } else if (typeof statusRaw === 'object' && statusRaw !== null) {
+    statusStr = Object.keys(statusRaw)[0] ?? 'Pending'
+  }
+
+  return {
+    escrowId: BigInt(native.escrow_id.toString()),
+    buyer: String(native.buyer),
+    seller: String(native.seller),
+    amount: BigInt(native.amount.toString()),
+    status: statusStr as OnChainEscrow['status'],
+    timeoutLedger: Number(native.timeout_ledger),
+    trackingNumber: String(native.tracking_number ?? ''),
+    courierCode: String(native.courier_code ?? ''),
+  }
 }

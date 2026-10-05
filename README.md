@@ -1,196 +1,191 @@
 # Titip Protocol
 
-> **Trustless QRIS escrow on Stellar/Soroban for Indonesian social commerce.**
+> **Trustless P2P Escrow on Stellar Soroban with Courier Delivery Verification & QRIS Support**
 
-Titip Protocol is a trustless escrow dApp built on the Stellar network and Soroban smart contract platform for informal Indonesian social commerce. It eliminates non-delivery fraud in peer-to-peer transactions conducted through WhatsApp, Instagram DMs, and TikTok Shop by inserting a programmable, oracle-driven escrow layer between buyer payment and seller payout — without disrupting either party's existing QRIS-based habits.
+[![Stellar Network](https://img.shields.io/badge/Stellar-Testnet-blue?style=flat-square&logo=stellar)](https://stellar.expert/explorer/testnet/contract/CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z)
+[![Soroban](https://img.shields.io/badge/Soroban-Rust%20WASM-orange?style=flat-square)](https://soroban.stellar.org)
+[![Next.js 14](https://img.shields.io/badge/Next.js-14%20(App%20Router)-black?style=flat-square&logo=next.js)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-**Problem:** Informal social commerce in Indonesia generates an estimated Rp 600 trillion in annual volume. Buyers pay into seller QRIS codes upfront with zero protection. Non-delivery fraud is endemic and has no recourse mechanism outside formal marketplace platforms.
+---
 
-**Solution:** Payment is converted to USDC stablecoin and locked in a Soroban smart contract. A courier oracle monitors J&T, JNE, and SiCepat APIs. On confirmed delivery, the contract releases fiat to the seller. On timeout, the buyer is refunded. Neither party sees the blockchain.
+## 📖 Overview
 
-**Target Users:**
-- Informal buyers (WhatsApp/Instagram/TikTok shop consumers)
-- Informal sellers (peer-to-peer storefront operators)
-- Group buyers (shared order coordinators)
+**Titip Protocol** is a decentralized, non-custodial escrow platform built on the **Stellar network** and **Soroban smart contracts**. It solves the rampant counterparty fraud in informal peer-to-peer commerce and cross-border shopping ("jastip") across Southeast Asia—specifically Indonesia—by locking payment in escrow and releasing funds **only when courier delivery is cryptographically verified** by an automated oracle.
 
+### The Problem
+In Indonesia and emerging markets, informal social commerce (via WhatsApp, Instagram DMs, and TikTok Shop) accounts for over Rp 600 trillion annually. Transactions suffer from a chronic lack of trust:
+- **Buyer Dilemma:** Transferring money upfront via QRIS or bank transfer offers zero protection. Non-delivery, counterfeit goods, or ghosting sellers leave buyers with no recourse.
+- **Seller Dilemma:** Cash-on-Delivery (COD) results in high order cancellation rates, return shipping costs, and tied-up working capital.
 
-> **TL;DR**
+### The Solution
+Titip Protocol bridges informal habits with blockchain guarantees:
+1. **Frictionless QRIS Parsing:** Buyers scan standard Indonesian QRIS codes to extract seller identity directly.
+2. **Soroban Smart Contract Escrow:** Funds (USDC stablecoins) are locked trustlessly on Stellar.
+3. **Automated Courier Oracle:** Background workers poll major couriers (J&T, JNE, SiCepat). Once the courier marks the package as **Delivered**, the oracle triggers the contract to release payouts automatically.
+4. **Deterministic Refund Guarantee:** If a seller fails to ship or delivery is not confirmed before the timeout ledger, buyers reclaim 100% of their funds.
 
-Titip Protocol protects buyers and sellers in informal Indonesian e-commerce (WhatsApp, Instagram, TikTok) by locking USDC in a Soroban smart contract until a courier oracle confirms delivery.
+---
 
+## 🚀 Key Features
 
-
-## Quick Start
-
-```bash
-# 1. Clone and install
-git clone https://github.com/your-org/titip-protocol.git
-cd titip-protocol
-npm install
-
-# 2. Start infrastructure (PostgreSQL + Redis)
-# If you have Docker installed: 
-docker compose up -d
-# Otherwise, use a cloud-hosted PostgreSQL + Redis
-
-# 3. Set up environment
-cp .env.example .env.local
-# Edit .env.local with your values (see Environment section below)
-
-# 4. Run database migrations
-npm --prefix packages/db run db:push
-
-# 5. Generate Prisma client
-npm --prefix packages/db run db:generate
-# Or
-npm run setup
-
-# 6. Start the dev server
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) and connect with Freighter.
-
-## Architecture
-
-```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  Next.js App    │────▶│  Soroban Contract     │◀────│  Oracle Service │
-│  (Buyer/Seller) │     │  (USDC Escrow)        │     │  (Courier APIs) │
-│                 │     │                       │     │                 │
-│  Freighter      │     │  create_escrow()      │     │  J&T / JNE /   │
-│  Wallet         │     │  fund()               │     │  SiCepat        │
-│  QRIS Scanner   │     │  submit_tracking()    │     │                 │
-│                 │     │  confirm_delivery()   │     │  Polls courier  │
-│                 │     │  claim_refund()        │     │  → confirms on  │
-│                 │     │                       │     │    chain         │
-└────────┬────────┘     └──────────────────────┘     └────────┬────────┘
-         │                                                      │
-         │              ┌──────────────────────┐                │
-         └─────────────▶│  PostgreSQL (Cache)   │◀──────────────┘
-                        │  + Redis (Job Queue)  │
-                        └──────────────────────┘
-```
-
-## Escrow Flow
-
-1. **Buyer** scans a QRIS code → merchant identity extracted via EMVCo parser
-2. **Buyer** signs `create_escrow()` + `fund()` → USDC locked in contract
-3. **Seller** submits tracking number → `submit_tracking()` on-chain
-4. **Oracle** polls courier API → confirms delivery → `confirm_delivery()` releases USDC to seller
-5. If no delivery after timeout → **Buyer** calls `claim_refund()` to get USDC back
-
-## Tech Stack
-
-| Layer | Technology |
+| Feature | Description |
 |---|---|
-| Frontend | Next.js 14 (App Router), TypeScript, shadcn/ui, Tailwind CSS |
-| State | Zustand (wallet), TanStack Query (server data) |
-| Wallet | Freighter (Stellar browser wallet) |
-| Smart Contract | Soroban (Rust) — USDC escrow state machine |
-| Database | PostgreSQL via Prisma ORM |
-| Oracle | Node.js + BullMQ + Redis |
-| Blockchain | Stellar Testnet (Horizon + Soroban RPC) |
+| 🔒 **Non-Custodial Escrow** | Funds are held exclusively in the Soroban smart contract, never by a centralized company or middleman. |
+| 🚚 **Automated Delivery Oracle** | Validates tracking numbers with real-world logistics APIs and executes on-chain payout upon verified delivery. |
+| 📱 **EMVCo QRIS Scanner** | Built-in camera and file scanner that decodes standard merchant QRIS payloads and verifies CRC16 checksums. |
+| ⏱️ **Guaranteed Refund Timeout** | Transparent ledger-based timeout protection ensuring buyers can safely withdraw funds if the order is abandoned. |
+| ⚖️ **Dispute Mediation** | On-chain dispute flagging allows buyers or sellers to halt automatic release if an issue arises for human arbiter resolution. |
+| 🌐 **Bilingual Localization** | Full native support for Bahasa Indonesia and English with high-contrast, accessible UI design (WCAG AAA). |
+| 📲 **Progressive Web App (PWA)** | Installable directly on iOS and Android devices with instant offline caching and responsive mobile layout. |
 
-## Project Structure
+---
+
+## 🔄 How It Works
+
+```
+  [ BUYER ]                                   [ STELLAR / SOROBAN ]                            [ SELLER ]
+     │                                                  │                                          │
+     │ 1. Scan Seller QRIS / Input Order Details        │                                          │
+     │ 2. Sign create_escrow() & fund(USDC)             │                                          │
+     ├─────────────────────────────────────────────────▶│                                          │
+     │    (Funds locked securely in contract)           │                                          │
+     │                                                  │    3. View Escrow & Dispatch Item        │
+     │                                                  │◀─────────────────────────────────────────┤
+     │                                                  │    4. submit_tracking(AWB_NUMBER)        │
+     │                                                  │                                          │
+     │                     [ COURIER ORACLE ]           │                                          │
+     │                            │                     │                                          │
+     │                            │ 5. Poll Courier API │                                          │
+     │                            │ (J&T / JNE / etc.)  │                                          │
+     │                            ▼                     │                                          │
+     │                     Status: DELIVERED            │                                          │
+     │                            │                     │                                          │
+     │                            │ 6. confirm_delivery()                                          │
+     │                            └────────────────────▶│                                          │
+     │                                                  │                                          │
+     │                                                  │ 7. Contract automatically transfers      │
+     │                                                  │    payout directly to Seller             │
+     │                                                  ├─────────────────────────────────────────▶│
+     ▼                                                  ▼                                          ▼
+```
+
+---
+
+## 🛠️ Architecture & Monorepo Structure
 
 ```
 titip-protocol/
 ├── apps/
-│   ├── web/                  # Next.js frontend + API routes
-│   │   ├── app/              # App Router pages + API
-│   │   ├── components/       # React components (shadcn + custom)
-│   │   ├── lib/              # Stellar SDK wrappers, QRIS parser, i18n
-│   │   └── hooks/            # Custom React hooks
-│   └── oracle/               # Courier polling + oracle service
+│   ├── web/                     # Next.js 14 App Router web application
+│   │   ├── app/                 # Client pages & secure API routes
+│   │   ├── components/          # Reusable UI components & escrow widgets
+│   │   ├── lib/                 # Stellar SDK, QRIS parser, SEP-10 auth
+│   │   └── hooks/               # Custom hooks for wallet and contract state
+│   └── oracle/                  # BullMQ + Redis background logistics polling worker
 ├── packages/
-│   ├── contracts/            # Soroban smart contract (Rust)
-│   ├── db/                   # Prisma schema + migrations
-│   └── shared-types/         # Shared TypeScript types
-├── scripts/                  # Demo + testing scripts
-├── docker-compose.yml        # PostgreSQL + Redis
-└── claude.md                 # AI agent instructions
+│   ├── contracts/               # Soroban smart contract source code (Rust)
+│   ├── db/                      # PostgreSQL schema & Prisma ORM definitions
+│   └── shared-types/            # Shared TypeScript interfaces & types
+├── scripts/                     # Deployment, funding & end-to-end simulation scripts
+├── docker-compose.yml           # PostgreSQL & Redis development stack
+└── README.md
 ```
-
-## Deployed Contract
-
-| Resource | Value |
-|---|---|
-| **Contract Address** | `CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z` |
-| **Network** | Stellar Testnet |
-| **Stellar Expert** | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z) |
-| **USDC Asset** | `USDC:GDPQBFYZYWZZHUANOLL2TOIJVIP4JLVRHXTYGGVDGASOW6RGM26MSXZ2` (mock testnet issuer) |
-| **USDC SAC** | `CAWMLY7NIWOOL4766XQMN7B7ETXPMQMU2JKUGHY5ROQIAU6GBPKJV34K` |
-
-<!-- TODO(mainnet): Update contract address and USDC issuer for mainnet deployment -->
-
-## Environment Variables
-
-Copy `.env.example` to `.env.local` and fill in:
-
-```bash
-# Required
-NEXT_PUBLIC_CONTRACT_ADDRESS=<deployed contract C... address>
-NEXT_PUBLIC_USDC_ISSUER=<USDC issuer G... address>
-DATABASE_URL=postgresql://titip:titip@localhost:5432/titip_db
-JWT_SECRET=<random 32+ char string>
-ORACLE_SECRET_KEY=<oracle Stellar secret key S...>
-ORACLE_INTERNAL_API_KEY=<shared secret for oracle auth>
-
-# Auto-configured for testnet
-NEXT_PUBLIC_STELLAR_NETWORK=testnet
-NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
-NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-```
-
-See [.env.example](.env.example) for the full list.
-
-## Demo Scripts
-
-```bash
-# Deploy contract to testnet and initialize with USDC token
-npm run demo:deploy
-
-# Pre-fund testnet accounts with XLM + USDC trustlines
-npm run demo:fund
-
-# Create USDC issuer and mint to demo accounts
-npm run demo:usdc
-
-# Run the full escrow lifecycle (DB simulation)
-npm run demo:simulate
-
-# Trigger oracle delivery confirmation for a specific escrow
-npm run demo:confirm
-```
-
-## Key Design Decisions
-
-1. **Chain is source of truth.** PostgreSQL is a cache/index. On conflict, sync from chain.
-2. **Oracle-only release.** Only the whitelisted oracle can call `confirm_delivery()`. Sellers cannot self-confirm.
-3. **Timeout-based refunds.** Buyers can only claim refunds after `timeout_ledger` has passed (minimum ~83 minutes).
-4. **QRIS-first identity.** Merchant identity is extracted from the QRIS EMVCo payload — no separate registration needed.
-
-## Development
-
-```bash
-# Run the web app in development
-npm run dev
-
-# Run database studio (GUI)
-npm --prefix packages/db run db:studio
-
-# Build the Soroban contract
-cd packages/contracts && cargo build --target wasm32-unknown-unknown --release
-
-# Run contract tests
-cd packages/contracts && cargo test
-```
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-Built for the Stellar Hackathon 2026 🚀
+## ⚡ Quick Start
+
+### 1. Prerequisites
+- **Node.js**: v18.18.0 or higher
+- **npm**: v9.0.0 or higher
+- **Docker & Docker Compose**: (for local PostgreSQL & Redis)
+- **Freighter Wallet Extension**: [freighter.app](https://www.freighter.app/) (switched to **Testnet**)
+
+### 2. Clone & Install
+```bash
+git clone https://github.com/rafboa/titip-protocol.git
+cd titip-protocol
+npm install
+```
+
+### 3. Spin Up Infrastructure
+Start local PostgreSQL and Redis containers:
+```bash
+docker compose up -d
+```
+
+### 4. Configure Environment
+Copy `.env.example` to `.env.local`:
+```bash
+cp .env.example .env.local
+```
+> Fill in the variables in `.env.local`. For local testing, default database and testnet endpoints are preconfigured.
+
+### 5. Initialize Database
+Push schema migrations and generate the Prisma client:
+```bash
+npm run setup
+```
+
+### 6. Start Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser and connect your Freighter wallet.
+
+---
+
+## 📜 Deployed Smart Contract (Stellar Testnet)
+
+| Contract / Asset | Identifier | Explorer |
+|---|---|---|
+| **Titip Escrow Contract** | `CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z) |
+| **USDC SAC (Contract)** | `CAWMLY7NIWOOL4766XQMN7B7ETXPMQMU2JKUGHY5ROQIAU6GBPKJV34K` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CAWMLY7NIWOOL4766XQMN7B7ETXPMQMU2JKUGHY5ROQIAU6GBPKJV34K) |
+| **USDC Issuer** | `GDPQBFYZYWZZHUANOLL2TOIJVIP4JLVRHXTYGGVDGASOW6RGM26MSXZ2` | [Stellar Expert](https://stellar.expert/explorer/testnet/account/GDPQBFYZYWZZHUANOLL2TOIJVIP4JLVRHXTYGGVDGASOW6RGM26MSXZ2) |
+
+---
+
+## 🧪 Testing & Verification
+
+### Running Automated Unit & Integration Tests
+```bash
+# Run unit tests (QRIS TLV parser, CRC16 verification, utilities)
+npm test
+
+# Type-check TypeScript codebase
+npx tsc --noEmit
+npm --prefix apps/oracle run build
+
+# Run Next.js production build verification
+npm run build
+```
+
+### Compiling Smart Contracts
+```bash
+# Requires Rust 1.84+ and wasm32v1-none target
+npm run build:contract
+
+# Run Rust smart contract unit tests
+cd packages/contracts
+cargo test
+```
+
+---
+
+## 🔐 Security & Best Practices
+
+- **Zero Private Keys in Client:** All client transactions are signed directly via the user's Freighter extension. No private keys are ever collected or stored on the server.
+- **On-Chain Proof Verification:** State transitions are verified against on-chain transaction hashes and Soroban RPC simulation data before database synchronization.
+- **Timing-Safe Oracle Endpoints:** Internal webhook routes utilize constant-time buffer comparisons (`crypto.timingSafeEqual`) to prevent timing side-channel attacks.
+- **Rate-Limited API Layer:** Sliding-window rate limiters prevent API spam and brute-force tracking lookups.
+
+---
+
+## 📄 License
+
+This repository is licensed under the [MIT License](LICENSE).
+
+---
+*Built with ❤️ for the Stellar Community.*

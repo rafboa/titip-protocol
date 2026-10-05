@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Wallet, LogOut, Package } from 'lucide-react';
+import { Wallet, LogOut, Package, Settings } from 'lucide-react';
 
 import { useAuthStore } from '@/lib/store/auth';
 import { useTranslation } from '@/lib/i18n/use-translation';
@@ -20,28 +20,40 @@ export function Navbar() {
 
   return (
     <nav className="sticky top-0 z-40 flex items-center justify-between border-b border-border bg-[rgba(11,14,20,0.8)] px-6 py-4 backdrop-blur-md">
-      {/* Left: logo + nav links */}
       <div className="flex items-center gap-4 sm:gap-8">
         <Link href="/" className="flex items-center gap-2 text-lg font-bold sm:text-xl">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary font-bold text-white">
             T
           </div>
           <span className="hidden xs:inline sm:inline">
-            Titip <span className="text-gradient">Protocol</span>
+            Titip Protocol
           </span>
         </Link>
 
         {isAuthenticated && (
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Package size={18} /> <span className="hidden sm:inline">{t('nav.dashboard')}</span>
-          </Link>
+          <>
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Package size={18} /> <span className="hidden sm:inline">{t('nav.dashboard')}</span>
+            </Link>
+            <Link
+              href="/wallet"
+              className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Wallet size={18} /> <span className="hidden sm:inline">{t('nav.wallet')}</span>
+            </Link>
+            <Link
+              href="/settings"
+              className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Settings size={18} /> <span className="hidden sm:inline">{t('nav.settings')}</span>
+            </Link>
+          </>
         )}
       </div>
 
-      {/* Right: language switcher + wallet badge + notification bell + disconnect */}
       <div className="flex items-center gap-1 sm:gap-2">
         <LanguageSwitcher />
 
@@ -56,7 +68,6 @@ export function Navbar() {
             {/* Notification bell — renders null when not authenticated */}
             <NotificationBell />
 
-            {/* Disconnect */}
             <Button variant="ghost" size="icon" onClick={logout} title={t('nav.disconnect')}>
               <LogOut size={20} />
             </Button>

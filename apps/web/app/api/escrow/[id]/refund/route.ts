@@ -1,27 +1,38 @@
-// GET /api/escrow/:id/refund — builds the unsigned claim_refund() transaction
-// for the buyer to sign.
-// POST /api/escrow/:id/refund — submits the buyer's signed claim_refund()
-// transaction and updates the escrow to REFUNDED.
-//
-// The contract itself enforces current_ledger > timeout_ledger and status
-// (FUNDED/SHIPPED only) — this route does not duplicate that logic, it just
-// relays the buyer's signed transaction and reflects the on-chain result.
-
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
-import { buildClaimRefundTx, submitSignedTx } from '@/lib/stellar/contracts/escrow'
+import { buildClaimRefundTx, submitSignedTx, getOnChainEscrow } from '@/lib/stellar/contracts/escrow'
+import { verifyJwt } from '@/lib/auth/sep10'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
     const { id } = await params
     const escrow = await prisma.escrow.findUnique({ where: { id } })
 
     if (!escrow) {
       return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
+    }
+
+    if (payload.address !== escrow.buyerAddress) {
+      return NextResponse.json(
+        { error: 'Forbidden: only the buyer can claim a refund' },
+        { status: 403 }
+      )
     }
 
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
@@ -57,6 +68,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
     const { id } = await params
     const body: unknown = await request.json()
     const parsed = RefundSchema.safeParse(body)
@@ -74,6 +97,13 @@ export async function POST(
       return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
     }
 
+    if (payload.address !== escrow.buyerAddress) {
+      return NextResponse.json(
+        { error: 'Forbidden: only the buyer can claim a refund' },
+        { status: 403 }
+      )
+    }
+
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
       return NextResponse.json(
         { error: `Cannot refund escrow with status "${escrow.status}".` },
@@ -88,6 +118,15 @@ export async function POST(
       const message = submitError instanceof Error ? submitError.message : 'Unknown error'
       return NextResponse.json(
         { error: 'Failed to submit refund transaction', details: message },
+        { status: 502 }
+      )
+    }
+
+    // Verify on-chain status
+    const onChain = await getOnChainEscrow(escrow.contractEscrowId)
+    if (onChain.status !== 'Refunded') {
+      return NextResponse.json(
+        { error: `Transaction submitted but contract status is "${onChain.status}", expected "Refunded"` },
         { status: 502 }
       )
     }

@@ -15,6 +15,8 @@ import { EscrowStatusBadge } from '@/components/escrow/escrow-status-badge';
 import { EscrowTimeline } from '@/components/escrow/escrow-timeline';
 import { TrackingForm } from '@/components/escrow/tracking-form';
 import { RefundButton } from '@/components/escrow/refund-button';
+import { DisputeButton } from '@/components/escrow/dispute-button';
+import { FundButton } from '@/components/escrow/fund-button';
 
 type EscrowDetail = {
   id: string;
@@ -160,6 +162,16 @@ export default function EscrowDetailPage() {
             refundedAt={escrow.refundedAt}
           />
 
+          {escrow.status === 'PENDING' && isBuyer && (
+            <div className="mb-8">
+              <FundButton
+                escrowId={escrow.id}
+                amountUsdc={parseFloat(escrow.amountUsdc)}
+                onFunded={refetch}
+              />
+            </div>
+          )}
+
           {escrow.status === 'FUNDED' && isBuyer && (
             <Card variant="glass" className="mb-8 border-secondary/20 bg-secondary/5 p-5 sm:p-8">
               <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-secondary sm:text-xl">
@@ -183,6 +195,21 @@ export default function EscrowDetailPage() {
             <div className="mb-8">
               <RefundButton escrowId={escrow.id} onRefunded={refetch} />
             </div>
+          )}
+
+          {(escrow.status === 'FUNDED' || escrow.status === 'SHIPPED') && (
+            <div className="mb-8 flex justify-end">
+              <DisputeButton escrowId={escrow.id} onDisputed={refetch} />
+            </div>
+          )}
+
+          {escrow.status === 'DISPUTED' && (
+            <Card variant="glass" className="mb-8 border-destructive/20 bg-destructive/5 p-5 sm:p-8">
+              <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-destructive sm:text-xl">
+                <AlertCircle size={20} /> {t('dispute.disputedTitle')}
+              </h3>
+              <p className="leading-relaxed text-muted-foreground">{t('dispute.disputedNotice')}</p>
+            </Card>
           )}
         </div>
       ) : null}

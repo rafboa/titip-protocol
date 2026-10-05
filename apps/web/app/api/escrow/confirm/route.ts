@@ -1,14 +1,9 @@
-// POST /api/escrow/confirm
-// Submits the buyer's signed create_escrow() transaction, reads back the
-// real contract-assigned escrow ID from the transaction result, creates the
-// DB record against that real ID, and returns the unsigned fund() transaction
-// for the buyer to sign next.
-
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
-import { submitCreateEscrowTx, buildFundEscrowTx } from '@/lib/stellar/contracts/escrow'
+import { submitCreateEscrowTx, buildFundEscrowTx, getOnChainEscrow } from '@/lib/stellar/contracts/escrow'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
+import { verifyJwt } from '@/lib/auth/sep10'
 
 const ConfirmEscrowSchema = z.object({
   signedCreateXdr: z.string().min(1, 'Signed create transaction XDR is required'),
@@ -24,6 +19,18 @@ const ConfirmEscrowSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
     const body: unknown = await request.json()
     const parsed = ConfirmEscrowSchema.safeParse(body)
 
@@ -37,6 +44,13 @@ export async function POST(request: NextRequest) {
     const { signedCreateXdr, buyerAddress, sellerAddress, amountUsdc, qrisSessionId, timeoutHours } =
       parsed.data
 
+    if (payload.address !== buyerAddress) {
+      return NextResponse.json(
+        { error: 'Forbidden: authenticated wallet does not match buyer address' },
+        { status: 403 }
+      )
+    }
+
     let contractEscrowId: bigint
     try {
       const result = await submitCreateEscrowTx(signedCreateXdr)
@@ -46,6 +60,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Failed to submit create_escrow transaction', details: message },
         { status: 502 }
+      )
+    }
+
+    // Verify on-chain state to prevent DB spoofing
+    const onChain = await getOnChainEscrow(contractEscrowId)
+    const expectedBaseUnits = BigInt(Math.round(parseFloat(amountUsdc) * 10_000_000))
+
+    if (
+      onChain.buyer !== buyerAddress ||
+      onChain.seller !== sellerAddress ||
+      onChain.amount !== expectedBaseUnits
+    ) {
+      return NextResponse.json(
+        { error: 'On-chain escrow parameters do not match request parameters' },
+        { status: 400 }
       )
     }
 

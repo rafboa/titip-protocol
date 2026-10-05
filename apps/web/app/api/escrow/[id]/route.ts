@@ -9,10 +9,10 @@ import { stellarExpertTxUrl } from '@/lib/utils'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params
+    const { id } = await Promise.resolve(params)
 
     const escrow = await prisma.escrow.findUnique({
       where: { id },

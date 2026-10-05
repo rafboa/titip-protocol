@@ -14,6 +14,7 @@ import { Bell, BellOff, Package, CheckCircle2, ShieldCheck, AlertCircle } from '
 import { useAuthStore } from '@/lib/store/auth';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from '@/lib/i18n/use-translation';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ function formatRelative(iso: string): string {
 
 export function NotificationBell() {
   const { publicKey, isAuthenticated } = useAuthStore();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -162,13 +164,13 @@ export function NotificationBell() {
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <span className="text-sm font-semibold">Notifikasi</span>
+            <span className="text-sm font-semibold">{t('notifications.title')}</span>
             {unread > 0 && (
               <button
                 onClick={markAllRead}
                 className="text-xs text-primary hover:underline"
               >
-                Tandai semua terbaca
+                {t('notifications.markAllRead')}
               </button>
             )}
           </div>
@@ -178,7 +180,7 @@ export function NotificationBell() {
             {notifications.length === 0 ? (
               <li className="flex flex-col items-center gap-3 px-4 py-8 text-center text-muted-foreground">
                 <BellOff size={28} className="opacity-40" />
-                <span className="text-sm">Belum ada notifikasi</span>
+                <span className="text-sm">{t('notifications.empty')}</span>
               </li>
             ) : (
               notifications.map((n) => (
@@ -219,7 +221,7 @@ export function NotificationBell() {
           {/* Footer */}
           {notifications.length > 0 && (
             <div className="border-t border-border px-4 py-2.5 text-center text-xs text-muted-foreground">
-              {notifications.length} notifikasi terbaru ditampilkan
+              {t('notifications.recentShown', { count: notifications.length.toString() })}
             </div>
           )}
         </div>

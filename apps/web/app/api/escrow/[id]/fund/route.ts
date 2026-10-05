@@ -1,11 +1,48 @@
-// POST /api/escrow/:id/fund
-// Submits the buyer's signed fund() transaction to Soroban RPC and, once it
-// succeeds on-chain, updates the escrow status to FUNDED with the real tx hash.
-
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
-import { submitSignedTx } from '@/lib/stellar/contracts/escrow'
+import { submitSignedTx, getOnChainEscrow, buildFundEscrowTx } from '@/lib/stellar/contracts/escrow'
+import { verifyJwt } from '@/lib/auth/sep10'
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
+    const { id } = await params
+    const escrow = await prisma.escrow.findUnique({ where: { id } })
+
+    if (!escrow) {
+      return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
+    }
+
+    if (payload.address !== escrow.buyerAddress) {
+      return NextResponse.json({ error: 'Forbidden: only the buyer can fund this escrow' }, { status: 403 })
+    }
+
+    if (escrow.status !== 'PENDING') {
+      return NextResponse.json({ error: `Cannot fund escrow with status "${escrow.status}"` }, { status: 409 })
+    }
+
+    const unsignedFundXdr = await buildFundEscrowTx(escrow.buyerAddress, escrow.contractEscrowId)
+    return NextResponse.json({ unsignedFundXdr })
+  } catch (error: unknown) {
+    console.error('[GET /api/escrow/:id/fund] Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
 
 const FundSchema = z.object({
   signedXdr: z.string().min(1, 'Signed transaction XDR is required'),
@@ -16,6 +53,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
+    }
+
+    let payload
+    try {
+      payload = await verifyJwt(authHeader)
+    } catch {
+      return NextResponse.json({ error: 'Unauthorized: invalid or expired session' }, { status: 401 })
+    }
+
     const { id } = await params
     const body: unknown = await request.json()
     const parsed = FundSchema.safeParse(body)
@@ -33,6 +82,13 @@ export async function POST(
       return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
     }
 
+    if (payload.address !== escrow.buyerAddress) {
+      return NextResponse.json(
+        { error: 'Forbidden: only the buyer can fund this escrow' },
+        { status: 403 }
+      )
+    }
+
     if (escrow.status !== 'PENDING') {
       return NextResponse.json(
         { error: `Cannot fund escrow with status "${escrow.status}". Expected "PENDING".` },
@@ -40,8 +96,6 @@ export async function POST(
       )
     }
 
-    // Actually submit the buyer-signed transaction to the network — the
-    // resulting hash (not a client-supplied one) is what gets persisted.
     let txHash: string
     try {
       txHash = await submitSignedTx(parsed.data.signedXdr)
@@ -49,6 +103,15 @@ export async function POST(
       const message = submitError instanceof Error ? submitError.message : 'Unknown error'
       return NextResponse.json(
         { error: 'Failed to submit funding transaction', details: message },
+        { status: 502 }
+      )
+    }
+
+    // Verify on-chain state to prevent phantom funding
+    const onChain = await getOnChainEscrow(escrow.contractEscrowId)
+    if (onChain.status !== 'Funded') {
+      return NextResponse.json(
+        { error: `Transaction submitted but contract status is "${onChain.status}", expected "Funded"` },
         { status: 502 }
       )
     }

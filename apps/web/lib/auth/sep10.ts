@@ -22,10 +22,6 @@ import {
 import { SignJWT, jwtVerify } from 'jose'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 // SEP-10 challenge transaction is valid for 5 minutes
 const CHALLENGE_EXPIRY_SECONDS = 5 * 60
 
@@ -34,10 +30,6 @@ const JWT_EXPIRY = '7d'
 
 // Manage data key used in the challenge operation
 const SEP10_MANAGE_DATA_KEY = 'titip_auth'
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Returns the network passphrase string for the current environment.
@@ -70,10 +62,6 @@ function getJwtSecret(): Uint8Array {
   }
   return new TextEncoder().encode(secret)
 }
-
-// ---------------------------------------------------------------------------
-// Challenge transaction builder
-// ---------------------------------------------------------------------------
 
 type BuildChallengeResult = {
   transactionXdr: string
@@ -151,10 +139,6 @@ export async function buildChallenge(clientPublicKey: string): Promise<BuildChal
     expiresAt: new Date(expiresAt * 1000).toISOString(),
   }
 }
-
-// ---------------------------------------------------------------------------
-// Challenge verification
-// ---------------------------------------------------------------------------
 
 type VerifyResult = {
   /** JWT token for the authenticated session */
@@ -240,10 +224,6 @@ export async function verifyChallenge(signedXdr: string): Promise<VerifyResult> 
 
   return { token, address: clientPublicKey }
 }
-
-// ---------------------------------------------------------------------------
-// JWT verification (for use in protected API routes)
-// ---------------------------------------------------------------------------
 
 type JwtPayload = {
   sub: string

@@ -14,20 +14,25 @@ const ConfirmSchema = z.object({
   courierResponse: z.record(z.string(), z.any()).optional(),
 })
 
+import crypto from 'crypto'
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) return false
+  return crypto.timingSafeEqual(bufA, bufB)
+}
+
 export async function POST(request: NextRequest) {
-  // Authenticate via Bearer token
   const authHeader = request.headers.get('authorization')
   const expectedToken = process.env.ORACLE_INTERNAL_API_KEY
 
   if (!expectedToken) {
     console.error('[POST /api/oracle/confirm] ORACLE_INTERNAL_API_KEY not set in environment')
-    return NextResponse.json(
-      { error: 'Server misconfiguration' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 })
   }
 
-  if (authHeader !== `Bearer ${expectedToken}`) {
+  if (!authHeader || !timingSafeEqualStr(authHeader, `Bearer ${expectedToken}`)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -57,32 +62,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Use a transaction to atomically update escrow + create oracle event + notifications
-    // NOTE: We do the on-chain submission FIRST, before the DB update.
-    // If the DB update fails, we can recover because the contract is already DELIVERED.
-    // If the contract call fails, the DB stays SHIPPED.
-
-    let txHashRelease: string | null = null
     const oracleSecret = process.env.ORACLE_SECRET_KEY
+    if (!oracleSecret) {
+      console.error('[POST /api/oracle/confirm] ORACLE_SECRET_KEY is missing; cannot release funds on-chain')
+      return NextResponse.json(
+        { error: 'Server misconfiguration: ORACLE_SECRET_KEY missing' },
+        { status: 500 }
+      )
+    }
 
-    if (oracleSecret) {
-      try {
-        console.log(`[POST /api/oracle/confirm] Submitting confirm_delivery on-chain for contract escrow ID ${escrow.contractEscrowId}...`)
-        const { submitConfirmDeliveryTx } = await import('@/lib/stellar/contracts/escrow')
-        txHashRelease = await submitConfirmDeliveryTx(
-          BigInt(escrow.contractEscrowId.toString()),
-          oracleSecret
-        )
-        console.log(`[POST /api/oracle/confirm] On-chain confirm_delivery successful: ${txHashRelease}`)
-      } catch (err: unknown) {
-        console.error(`[POST /api/oracle/confirm] Failed to submit confirm_delivery on-chain:`, err)
-        return NextResponse.json(
-          { error: 'Failed to submit on-chain transaction' },
-          { status: 502 }
-        )
-      }
-    } else {
-      console.warn(`[POST /api/oracle/confirm] WARNING: ORACLE_SECRET_KEY not set. Skipping on-chain confirm_delivery!`)
+    let txHashRelease: string
+    try {
+      const { submitConfirmDeliveryTx } = await import('@/lib/stellar/contracts/escrow')
+      txHashRelease = await submitConfirmDeliveryTx(
+        BigInt(escrow.contractEscrowId.toString()),
+        oracleSecret
+      )
+    } catch (err: unknown) {
+      console.error('[POST /api/oracle/confirm] Failed to submit confirm_delivery on-chain:', err)
+      return NextResponse.json(
+        { error: 'Failed to submit on-chain transaction' },
+        { status: 502 }
+      )
     }
 
     const [updated] = await prisma.$transaction([
