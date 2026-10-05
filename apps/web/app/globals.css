@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
+
 :root {
   /* Color Palette */
   --bg-main: #0B0E14; /* Deep Space Blue */
@@ -44,10 +51,6 @@ body {
   line-height: 1.5;
   min-height: 100vh;
   overflow-x: hidden;
-  background-image:
-    radial-gradient(circle at 15% 50%, rgba(79, 70, 229, 0.12), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(6, 182, 212, 0.12), transparent 25%);
-  background-attachment: fixed;
 }
 
 a {

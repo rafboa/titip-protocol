@@ -72,7 +72,7 @@ export function TrackingForm({
   };
 
   return (
-    <Card className="p-5 sm:p-8">
+    <Card variant="glass" className="p-5 sm:p-8">
       <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold sm:text-xl">
         <Truck size={20} className="text-primary" /> {t('tracking.title')}
       </h3>

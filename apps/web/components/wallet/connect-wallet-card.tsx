@@ -99,7 +99,7 @@ export function ConnectWalletCard({ onSuccess }: { onSuccess?: () => void }) {
         </Button>
       ) : (
         <div className="flex flex-col items-center gap-4 py-4">
-          <Loader2 size={32} className="text-gradient animate-spin" />
+          <Loader2 size={32} className="text-primary animate-spin" />
           <span className="text-center text-muted-foreground">{t(`connectSteps.${step}`)}</span>
         </div>
       )}

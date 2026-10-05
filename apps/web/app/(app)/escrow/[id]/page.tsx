@@ -86,7 +86,7 @@ export default function EscrowDetailPage() {
             <EscrowStatusBadge status={escrow.status} />
           </div>
 
-          <Card className="mb-8 p-5 sm:p-8">
+          <Card variant="glass" className="mb-8 p-5 sm:p-8">
             <h3 className="mb-6 flex items-center gap-2 text-lg font-semibold sm:text-xl">
               <Package size={20} className="text-primary" /> {t('escrowDetail.contractDetails')}
             </h3>
@@ -161,7 +161,7 @@ export default function EscrowDetailPage() {
           />
 
           {escrow.status === 'FUNDED' && isBuyer && (
-            <Card className="mb-8 border-secondary/20 bg-secondary/5 p-5 sm:p-8">
+            <Card variant="glass" className="mb-8 border-secondary/20 bg-secondary/5 p-5 sm:p-8">
               <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-secondary sm:text-xl">
                 <ShieldCheck size={20} /> {t('escrowDetail.fundsSecuredTitle')}
               </h3>

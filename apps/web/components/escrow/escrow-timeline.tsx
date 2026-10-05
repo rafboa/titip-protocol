@@ -38,7 +38,8 @@ export function EscrowTimeline({
   if (refundedAt) steps.push({ labelKey: 'timeline.refunded', timestamp: refundedAt, icon: RotateCcw });
 
   return (
-    <Card className="mb-8 p-5 sm:p-8">
+    // Glass card — this is a primary content surface on the escrow detail page (DESIGN.md Section 5)
+    <Card variant="glass" className="mb-8 p-5 sm:p-8">
       <h3 className="mb-6 flex items-center gap-2 text-lg font-semibold sm:text-xl">
         <Package size={20} className="text-primary" /> {t('timeline.title')}
       </h3>
@@ -47,15 +48,21 @@ export function EscrowTimeline({
         {steps.map((step, index) => {
           const Icon = step.icon;
           const isLast = index === steps.length - 1;
+          // Refunded terminal state uses destructive color; all others use primary
+          const isRefund = step.labelKey === 'timeline.refunded';
+          const lastClass = isRefund
+            ? 'border-destructive bg-destructive/10 text-destructive'
+            : 'border-primary bg-primary/10 text-primary';
           return (
             <div key={step.labelKey} className="relative flex gap-4">
               {!isLast && (
-                <div className="absolute left-[15px] top-8 h-[calc(100%-8px)] w-px bg-border" aria-hidden />
+                // Progress trail uses success color to read as "completed steps" — DESIGN.md Section 6
+                <div className="absolute left-[15px] top-8 h-[calc(100%-8px)] w-px bg-success/40" aria-hidden />
               )}
               <div
                 className={cn(
                   'z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-                  isLast ? 'border-primary bg-primary/10 text-primary' : 'border-success bg-success/10 text-success'
+                  isLast ? lastClass : 'border-success bg-success/10 text-success'
                 )}
               >
                 <Icon size={16} />

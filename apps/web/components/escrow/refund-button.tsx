@@ -52,7 +52,7 @@ export function RefundButton({ escrowId, onRefunded }: { escrowId: string; onRef
   };
 
   return (
-    <Card className="border-warning/20 bg-warning/5 p-5 sm:p-8">
+    <Card variant="glass" className="border-warning/20 bg-warning/5 p-5 sm:p-8">
       <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-warning sm:text-xl">
         <RotateCcw size={20} /> {t('refund.title')}
       </h3>

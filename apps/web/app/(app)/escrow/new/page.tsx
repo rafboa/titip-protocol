@@ -164,7 +164,7 @@ export default function CreateEscrowPage() {
       <h1 className="mb-2 text-3xl font-bold sm:text-4xl">{t('createEscrow.title')}</h1>
       <p className="mb-8 text-muted-foreground sm:mb-12">{t('createEscrow.subtitle')}</p>
 
-      <Card className="animate-fade-in p-5 sm:p-8">
+      <Card variant="glass" className="animate-fade-in p-5 sm:p-8">
         <div className="mb-6 flex items-start gap-4">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
             <QrCode size={24} className="text-primary" />

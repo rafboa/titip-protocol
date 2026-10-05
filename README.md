@@ -42,6 +42,8 @@ npm --prefix packages/db run db:push
 
 # 5. Generate Prisma client
 npm --prefix packages/db run db:generate
+# Or
+npm run setup
 
 # 6. Start the dev server
 npm run dev
