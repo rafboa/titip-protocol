@@ -65,6 +65,35 @@ async function pollShippedEscrows(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Poller: hand unprocessed webhook events (persisted by the web app) to the worker.
+// jobId = event id, so a re-poll while the job is queued/active never duplicates it.
+// ---------------------------------------------------------------------------
+async function pollWebhookEvents(): Promise<void> {
+  try {
+    const events = await prisma.webhookEvent.findMany({
+      where: { processedAt: null },
+      select: { id: true },
+      orderBy: { receivedAt: 'asc' },
+      take: 100,
+    })
+    for (const event of events) {
+      await trackingQueue.add(
+        'webhook-event',
+        { webhookEventId: event.id },
+        { jobId: `webhook-${event.id}`, removeOnComplete: true, removeOnFail: true }
+      )
+    }
+  } catch (err) {
+    console.error('[poller] webhook scan failed:', err)
+  }
+}
+
+async function pollAll(): Promise<void> {
+  await pollShippedEscrows()
+  await pollWebhookEvents()
+}
+
+// ---------------------------------------------------------------------------
 // Graceful shutdown
 // ---------------------------------------------------------------------------
 async function shutdown(worker: ReturnType<typeof createTrackingWorker>): Promise<void> {
@@ -91,8 +120,8 @@ const worker = createTrackingWorker()
 console.log('[oracle] Tracking worker started ✓')
 
 // Run the first poll immediately on startup, then on interval
-await pollShippedEscrows()
-const pollInterval = setInterval(pollShippedEscrows, config.POLL_INTERVAL_MS)
+await pollAll()
+const pollInterval = setInterval(pollAll, config.POLL_INTERVAL_MS)
 console.log(`[oracle] Poller running every ${config.POLL_INTERVAL_MS / 1000}s ✓`)
 
 // Graceful shutdown on SIGINT / SIGTERM

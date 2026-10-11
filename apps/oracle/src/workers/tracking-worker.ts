@@ -10,7 +10,7 @@
 
 import { Worker, type Job, type WorkerOptions } from 'bullmq'
 import { PrismaClient, type Prisma } from '@prisma/client'
-import { TRACKING_QUEUE_NAME, type TrackingJobData } from '../queues/tracking.js'
+import { TRACKING_QUEUE_NAME, type TrackingJobData, type TrackingQueueData } from '../queues/tracking.js'
 import { jntAdapter } from '../couriers/jnt.js'
 import { jneAdapter } from '../couriers/jne.js'
 import { sicepatAdapter } from '../couriers/sicepat.js'
@@ -18,6 +18,7 @@ import { mockAdapter } from '../couriers/mock.js'
 import { confirmDelivery, submitConfirmDeliveryOnChain } from '../stellar/submit.js'
 import { config } from '../config.js'
 import type { CourierAdapter } from '../couriers/types.js'
+import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
 
 const prisma = new PrismaClient()
 
@@ -122,9 +123,49 @@ async function logOracleEvent(
 }
 
 // ---------------------------------------------------------------------------
+// Webhook events (persisted by the web app's signed-webhook route)
+// ---------------------------------------------------------------------------
+const webhookDeps: WebhookDeps = {
+  getEvent: (id) => prisma.webhookEvent.findUnique({ where: { id } }),
+  findEscrow: (courier, trackingNumber) =>
+    prisma.escrow.findFirst({
+      where: { courierCode: courier as 'JNT' | 'JNE' | 'SICEPAT', trackingNumber },
+      select: {
+        id: true,
+        status: true,
+        contractAddress: true,
+        contractEscrowId: true,
+        buyerAddress: true,
+        sellerAddress: true,
+      },
+    }),
+  markProcessed: async (id) => {
+    await prisma.webhookEvent.update({ where: { id }, data: { processedAt: new Date() } })
+  },
+  logOracleEvent: (escrowId, eventType, payload) => logOracleEvent(escrowId, eventType, payload),
+  notify: async (userAddress, type, message) => {
+    await prisma.notification.create({ data: { userAddress, type, message } })
+  },
+  submitConfirmDelivery: submitConfirmDeliveryOnChain,
+  syncDelivery: async (escrowId, payload, txHash) => {
+    await confirmDelivery(escrowId, payload, txHash)
+  },
+  // TODO: wire openDispute once the contract lets the oracle call dispute_escrow.
+}
+
+async function processQueueJob(job: Job<TrackingQueueData>): Promise<void> {
+  if ('webhookEventId' in job.data) {
+    const outcome = await handleWebhookEvent(job.data.webhookEventId, webhookDeps)
+    console.log(`[worker] Job ${job.id} - webhook event ${job.data.webhookEventId}: ${outcome}`)
+    return
+  }
+  return processTrackingJob(job as Job<TrackingJobData>)
+}
+
+// ---------------------------------------------------------------------------
 // Worker factory
 // ---------------------------------------------------------------------------
-export function createTrackingWorker(): Worker<TrackingJobData> {
+export function createTrackingWorker(): Worker<TrackingQueueData> {
   const workerOptions: WorkerOptions = {
     connection: {
       url: config.REDIS_URL,
@@ -139,9 +180,9 @@ export function createTrackingWorker(): Worker<TrackingJobData> {
     },
   }
 
-  const worker = new Worker<TrackingJobData>(
+  const worker = new Worker<TrackingQueueData>(
     TRACKING_QUEUE_NAME,
-    processTrackingJob,
+    processQueueJob,
     workerOptions
   )
 

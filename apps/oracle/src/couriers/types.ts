@@ -1,9 +1,19 @@
 // apps/oracle/src/couriers/types.ts
 // Shared interface all courier adapters must implement.
 
+/** Lifecycle stage of a shipment, normalised across couriers */
+export type TrackingStage =
+  | 'PICKUP'
+  | 'IN_TRANSIT'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'RETURN_TO_SENDER'
+
 /** Standardised delivery status returned by every courier adapter */
 export type TrackingStatus = {
-  /** Whether the package has been delivered to the recipient */
+  /** Normalised lifecycle stage. Polling adapters that cannot tell stages apart use IN_TRANSIT. */
+  stage: TrackingStage
+  /** Whether the package has been delivered to the recipient (always equals stage === 'DELIVERED') */
   delivered: boolean
   /** Human-readable status text from the courier (English or Bahasa) */
   statusText: string
