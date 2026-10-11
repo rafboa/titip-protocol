@@ -62,6 +62,18 @@ model OracleEvent {
   @@map("oracle_events")
 }
 
+/// Dedup ledger for signed courier webhooks (replay protection). Redis is the fast path; this is the durable check.
+model WebhookEvent {
+  id          String      @id @default(cuid())
+  courier     CourierCode
+  eventId     String      @map("event_id")
+  stage       String
+  payloadHash String      @map("payload_hash")
+  receivedAt  DateTime    @default(now()) @map("received_at")
+  @@unique([courier, eventId])
+  @@map("webhook_events")
+}
+
 model QrisSession {
   id           String   @id @default(cuid())
   payloadRaw   String   @map("payload_raw") @db.Text

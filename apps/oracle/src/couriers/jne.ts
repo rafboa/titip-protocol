@@ -76,6 +76,7 @@ export const jneAdapter: CourierAdapter = {
     const delivered = DELIVERED_DESCRIPTIONS.some((s) => lastStatus.includes(s))
 
     return {
+      stage: delivered ? 'DELIVERED' : 'IN_TRANSIT', // v1.1: map intermediate courier codes to PICKUP/OUT_FOR_DELIVERY/RETURN_TO_SENDER
       delivered,
       statusText: detail.cnote.cnote_last_status,
       raw: data as unknown as Record<string, unknown>,
