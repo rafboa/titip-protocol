@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, log, symbol_short, token, Address, Env, String
-    
+    contract, contracterror, contractimpl, contracttype, log, symbol_short, token, Address, BytesN, Env,
+    String, Vec,
 };
 
 // ============================================================================
@@ -55,6 +55,26 @@ pub struct Config {
     pub next_escrow_id: u64,
 }
 
+/// M-of-N oracle set. When present it replaces the single `Config.oracle`: delivery is released
+/// only once `threshold` distinct oracles from `oracles` have approved it.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleSet {
+    pub oracles: Vec<Address>,
+    pub threshold: u32,
+}
+
+/// One piece of dispute evidence: a SHA-256 hash of the file plus an optional pointer (e.g. an
+/// IPFS CID or a URL). The file itself is never stored on-chain.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvidenceItem {
+    pub submitter: Address,
+    pub hash: BytesN<32>,
+    pub uri: String,
+    pub ledger: u32,
+}
+
 // ============================================================================
 // Storage Keys
 // ============================================================================
@@ -63,6 +83,12 @@ pub struct Config {
 pub enum DataKey {
     Config,
     Escrow(u64),
+    /// Optional M-of-N oracle set (absent = legacy single oracle).
+    OracleSet,
+    /// Oracles that approved delivery of an escrow.
+    Approvals(u64),
+    /// Evidence committed for a disputed escrow.
+    Evidence(u64),
 }
 
 // ============================================================================
@@ -91,6 +117,12 @@ pub enum EscrowError {
     TimeoutNotReached = 8,
     /// Buyer cannot be the same address as seller.
     BuyerIsSeller = 9,
+    /// Oracle set is empty, too large, has duplicates, or the threshold is out of range.
+    InvalidOracleSet = 10,
+    /// Basis points must be between 0 and 10_000.
+    InvalidBps = 11,
+    /// Evidence limit reached or the evidence pointer is too long.
+    EvidenceLimit = 12,
 }
 
 // ============================================================================
@@ -99,6 +131,16 @@ pub enum EscrowError {
 
 /// Minimum timeout: 1000 ledgers (~83 minutes at ~5s/ledger).
 const MIN_TIMEOUT_LEDGERS: u32 = 1000;
+
+/// Maximum number of oracles in an M-of-N set.
+const MAX_ORACLES: u32 = 10;
+
+/// Maximum evidence items per party per escrow, and maximum length of an evidence pointer.
+const MAX_EVIDENCE_PER_PARTY: u32 = 10;
+const MAX_EVIDENCE_URI_LEN: u32 = 128;
+
+/// Basis points denominator (100% = 10_000).
+const BPS_DENOMINATOR: i128 = 10_000;
 
 // ============================================================================
 // Contract
@@ -342,6 +384,12 @@ impl TitipEscrowContract {
             .get(&DataKey::Config)
             .ok_or(EscrowError::NotInitialized)?;
 
+        // Once an M-of-N oracle set is configured, a single oracle must never be able to release
+        // funds alone: delivery then goes through `approve_delivery` only.
+        if env.storage().instance().has(&DataKey::OracleSet) {
+            return Err(EscrowError::Unauthorized);
+        }
+
         // Only the oracle can confirm delivery
         config.oracle.require_auth();
 
@@ -352,25 +400,109 @@ impl TitipEscrowContract {
             return Err(EscrowError::InvalidStatus);
         }
 
-        // Transfer USDC from contract to seller
-        let token_client = token::Client::new(&env, &escrow.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &escrow.seller,
-            &escrow.amount,
-        );
-
-        escrow.status = EscrowStatus::Delivered;
-        Self::save_escrow(&env, &escrow);
-
-        log!(&env, "Escrow {} delivered: USDC released to seller", escrow_id);
-
-        env.events().publish(
-            (symbol_short!("escrow"), symbol_short!("deliver")),
-            (escrow_id, escrow.seller.clone(), escrow.amount),
-        );
+        Self::release_to_seller(&env, &mut escrow);
 
         Ok(())
+    }
+
+    // ------------------------------------------------------------------------
+    // approve_delivery (M-of-N oracle)
+    // ------------------------------------------------------------------------
+
+    /// One oracle of the configured set approves delivery. When `threshold` distinct, currently
+    /// listed oracles have approved, the funds are released to the seller.
+    ///
+    /// Returns `true` if this call released the funds. Calling again with an oracle that has
+    /// already approved is allowed and only re-evaluates (it never counts twice), which also
+    /// completes a delivery whose threshold was lowered after the approvals were collected.
+    ///
+    /// Transitions: SHIPPED -> DELIVERED (terminal) once the threshold is met.
+    pub fn approve_delivery(env: Env, escrow_id: u64, oracle: Address) -> Result<bool, EscrowError> {
+        let config = Self::get_config(env.clone())?;
+        oracle.require_auth();
+
+        let set = Self::effective_oracle_set(&env, &config);
+        if !set.oracles.contains(&oracle) {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        let mut escrow = Self::load_escrow(&env, escrow_id)?;
+        if escrow.status != EscrowStatus::Shipped {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        let key = DataKey::Approvals(escrow_id);
+        let mut approvals: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !approvals.contains(&oracle) {
+            approvals.push_back(oracle.clone());
+            env.storage().persistent().set(&key, &approvals);
+            env.storage().persistent().extend_ttl(&key, 518_400, 518_400);
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("approve")),
+                (escrow_id, oracle.clone()),
+            );
+        }
+
+        // Only approvals from oracles that are still in the set count.
+        let mut valid: u32 = 0;
+        for approver in approvals.iter() {
+            if set.oracles.contains(&approver) {
+                valid += 1;
+            }
+        }
+        if valid < set.threshold {
+            return Ok(false);
+        }
+
+        env.storage().persistent().remove(&key);
+        Self::release_to_seller(&env, &mut escrow);
+        Ok(true)
+    }
+
+    /// Replace the oracle set. Admin only. `threshold` of the `oracles` must approve a delivery.
+    /// Approvals already collected stay stored, but only those from oracles that remain in the
+    /// set are counted.
+    pub fn set_oracles(env: Env, oracles: Vec<Address>, threshold: u32) -> Result<(), EscrowError> {
+        let config = Self::get_config(env.clone())?;
+        config.admin.require_auth();
+
+        let n = oracles.len();
+        if n == 0 || n > MAX_ORACLES || threshold == 0 || threshold > n {
+            return Err(EscrowError::InvalidOracleSet);
+        }
+        for i in 0..n {
+            let a = oracles.get(i).unwrap();
+            for j in (i + 1)..n {
+                if oracles.get(j).unwrap() == a {
+                    return Err(EscrowError::InvalidOracleSet);
+                }
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleSet, &OracleSet { oracles, threshold });
+        env.storage().instance().extend_ttl(518_400, 518_400);
+
+        log!(&env, "Oracle set updated: {} oracles, threshold {}", n, threshold);
+        Ok(())
+    }
+
+    /// The configured M-of-N oracle set, or `None` while the contract still uses the single oracle.
+    pub fn get_oracle_set(env: Env) -> Option<OracleSet> {
+        env.storage().instance().get(&DataKey::OracleSet)
+    }
+
+    /// Oracles that have approved delivery of this escrow so far.
+    pub fn get_delivery_approvals(env: Env, escrow_id: u64) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Approvals(escrow_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     // ------------------------------------------------------------------------
@@ -393,7 +525,8 @@ impl TitipEscrowContract {
 
         caller.require_auth();
 
-        if caller != escrow.buyer && caller != escrow.seller && caller != config.oracle {
+        let is_oracle = Self::effective_oracle_set(&env, &config).oracles.contains(&caller);
+        if caller != escrow.buyer && caller != escrow.seller && !is_oracle {
             return Err(EscrowError::Unauthorized);
         }
 
@@ -446,6 +579,117 @@ impl TitipEscrowContract {
         env.events().publish((symbol_short!("escrow"), symbol_short!("resolved")), (escrow_id, winner.clone(), escrow.amount));
 
         Ok(())
+    }
+
+    /// Admin resolves a dispute with a proportional split, e.g. `buyer_bps = 7000` refunds 70% to
+    /// the buyer and pays 30% to the seller.
+    ///
+    /// The buyer's share is rounded down and the seller receives the remainder, so the two
+    /// payouts always add up to exactly the locked amount. Transitions: DISPUTED -> REFUNDED when
+    /// the buyer gets everything (`buyer_bps = 10_000`), otherwise DISPUTED -> DELIVERED.
+    pub fn resolve_dispute_split(env: Env, escrow_id: u64, buyer_bps: u32) -> Result<(), EscrowError> {
+        let mut escrow = Self::load_escrow(&env, escrow_id)?;
+        let config = Self::get_config(env.clone())?;
+
+        config.admin.require_auth();
+
+        if escrow.status != EscrowStatus::Disputed {
+            return Err(EscrowError::InvalidStatus);
+        }
+        if (buyer_bps as i128) > BPS_DENOMINATOR {
+            return Err(EscrowError::InvalidBps);
+        }
+
+        let buyer_amount = escrow
+            .amount
+            .checked_mul(buyer_bps as i128)
+            .ok_or(EscrowError::InvalidAmount)?
+            / BPS_DENOMINATOR;
+        let seller_amount = escrow.amount - buyer_amount;
+
+        let token_client = token::Client::new(&env, &escrow.token);
+        if buyer_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &escrow.buyer, &buyer_amount);
+        }
+        if seller_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &escrow.seller, &seller_amount);
+        }
+
+        escrow.status = if seller_amount == 0 { EscrowStatus::Refunded } else { EscrowStatus::Delivered };
+        Self::save_escrow(&env, &escrow);
+
+        log!(&env, "Escrow {} dispute split: buyer {} / seller {}", escrow_id, buyer_amount, seller_amount);
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("split")),
+            (escrow_id, buyer_amount, seller_amount),
+        );
+
+        Ok(())
+    }
+
+    /// Buyer or seller commits the SHA-256 hash of a piece of evidence (photo, unboxing video) for
+    /// a disputed escrow. The file stays off-chain; `uri` is an optional pointer (e.g. a CID).
+    /// Each party may submit at most 10 items. Evidence can only be added while Disputed.
+    pub fn submit_evidence(
+        env: Env,
+        escrow_id: u64,
+        party: Address,
+        hash: BytesN<32>,
+        uri: String,
+    ) -> Result<(), EscrowError> {
+        party.require_auth();
+
+        let escrow = Self::load_escrow(&env, escrow_id)?;
+        if party != escrow.buyer && party != escrow.seller {
+            return Err(EscrowError::Unauthorized);
+        }
+        if escrow.status != EscrowStatus::Disputed {
+            return Err(EscrowError::InvalidStatus);
+        }
+        if uri.len() > MAX_EVIDENCE_URI_LEN {
+            return Err(EscrowError::EvidenceLimit);
+        }
+
+        let key = DataKey::Evidence(escrow_id);
+        let mut items: Vec<EvidenceItem> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut by_party: u32 = 0;
+        for item in items.iter() {
+            if item.submitter == party {
+                by_party += 1;
+            }
+        }
+        if by_party >= MAX_EVIDENCE_PER_PARTY {
+            return Err(EscrowError::EvidenceLimit);
+        }
+
+        items.push_back(EvidenceItem {
+            submitter: party.clone(),
+            hash: hash.clone(),
+            uri,
+            ledger: env.ledger().sequence(),
+        });
+        env.storage().persistent().set(&key, &items);
+        env.storage().persistent().extend_ttl(&key, 518_400, 518_400);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("evidence")),
+            (escrow_id, party, hash),
+        );
+
+        Ok(())
+    }
+
+    /// All evidence committed for an escrow, oldest first.
+    pub fn get_evidence(env: Env, escrow_id: u64) -> Vec<EvidenceItem> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Evidence(escrow_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
     // ------------------------------------------------------------------------
 
@@ -532,6 +776,8 @@ impl TitipEscrowContract {
 
         config.oracle = new_oracle.clone();
         env.storage().instance().set(&DataKey::Config, &config);
+        // Returning to a single oracle: drop any M-of-N set so it cannot keep the old oracles.
+        env.storage().instance().remove(&DataKey::OracleSet);
 
         log!(&env, "Oracle updated to {}", new_oracle);
 
@@ -541,6 +787,35 @@ impl TitipEscrowContract {
     // ------------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------------
+
+    /// The oracle set in force: the configured M-of-N set, or the legacy single oracle (1-of-1).
+    fn effective_oracle_set(env: &Env, config: &Config) -> OracleSet {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleSet)
+            .unwrap_or_else(|| {
+                let mut oracles = Vec::new(env);
+                oracles.push_back(config.oracle.clone());
+                OracleSet { oracles, threshold: 1 }
+            })
+    }
+
+    /// Pay the full escrow amount to the seller and mark the escrow Delivered (terminal).
+    /// Caller must already have checked authorization and that the status is Shipped.
+    fn release_to_seller(env: &Env, escrow: &mut Escrow) {
+        let token_client = token::Client::new(env, &escrow.token);
+        token_client.transfer(&env.current_contract_address(), &escrow.seller, &escrow.amount);
+
+        escrow.status = EscrowStatus::Delivered;
+        Self::save_escrow(env, escrow);
+
+        log!(env, "Escrow {} delivered: USDC released to seller", escrow.escrow_id);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("deliver")),
+            (escrow.escrow_id, escrow.seller.clone(), escrow.amount),
+        );
+    }
 
     fn load_escrow(env: &Env, escrow_id: u64) -> Result<Escrow, EscrowError> {
         env.storage()
@@ -563,3 +838,6 @@ impl TitipEscrowContract {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod test_multisig;
