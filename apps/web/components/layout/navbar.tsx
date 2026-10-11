@@ -68,8 +68,14 @@ export function Navbar() {
             {/* Notification bell — renders null when not authenticated */}
             <NotificationBell />
 
-            <Button variant="ghost" size="icon" onClick={logout} title={t('nav.disconnect')}>
-              <LogOut size={20} />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={logout}
+              title={t('nav.disconnect')}
+              aria-label={t('nav.disconnect')}
+            >
+              <LogOut size={20} aria-hidden="true" />
             </Button>
           </>
         ) : (
