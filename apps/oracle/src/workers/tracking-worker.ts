@@ -104,7 +104,11 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
   })
   if (!escrow) throw new Error(`Escrow ${escrowId} not found in DB`)
 
-  const { txHash } = await submitConfirmDeliveryOnChain(escrow.contractAddress, escrow.contractEscrowId)
+  const { released, txHash } = await submitConfirmDeliveryOnChain(escrow.contractAddress, escrow.contractEscrowId)
+  if (!released) {
+    console.log(`[worker] Job ${job.id} — approval sent for escrow ${escrowId}; waiting for the other oracles`)
+    return
+  }
   await confirmDelivery(escrowId, trackingResult.raw, txHash)
 
   console.log(`[worker] Job ${job.id} — escrow ${escrowId} confirmed and released ✓`)

@@ -50,8 +50,15 @@ export type WebhookDeps = {
   markProcessed(id: string): Promise<void>
   logOracleEvent(escrowId: string, eventType: string, payload: Record<string, unknown>): Promise<void>
   notify(userAddress: string, type: string, message: string): Promise<void>
-  /** Signs and submits confirm_delivery as the oracle. txHash is null if already Delivered on-chain. */
-  submitConfirmDelivery(contractAddress: string, contractEscrowId: bigint): Promise<{ txHash: string | null }>
+  /**
+   * Signs and submits this node's part of the delivery (confirm_delivery, or approve_delivery when
+   * the contract has an M-of-N oracle set). `released` is false while other oracles still have to
+   * approve; txHash is null when this node sent no transaction.
+   */
+  submitConfirmDelivery(
+    contractAddress: string,
+    contractEscrowId: bigint,
+  ): Promise<{ released: boolean; txHash: string | null }>
   /** Tells the web app to re-read the chain and sync the DB. */
   syncDelivery(escrowId: string, payload: Record<string, unknown>, txHash: string | null): Promise<void>
   /**
@@ -66,6 +73,7 @@ export type WebhookOutcome =
   | 'skipped-missing'
   | 'no-escrow'
   | 'delivered'
+  | 'awaiting-quorum'
   | 'leg-delivered'
   | 'deferred'
   | 'leg-not-approved'
@@ -118,9 +126,14 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
     } else if (!ref.isFinal) {
       outcome = 'leg-delivered'
     } else {
-      const { txHash } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
-      await deps.syncDelivery(escrow.id, payload, txHash)
-      outcome = 'delivered'
+      const { released, txHash } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
+      if (released) {
+        await deps.syncDelivery(escrow.id, payload, txHash)
+        outcome = 'delivered'
+      } else {
+        // This node did its part; the other oracles complete the quorum and sync the web app.
+        outcome = 'awaiting-quorum'
+      }
     }
   } else if (event.stage === 'RETURN_TO_SENDER') {
     if (DISPUTABLE.has(escrow.status)) {
