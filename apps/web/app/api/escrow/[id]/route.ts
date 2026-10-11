@@ -27,6 +27,10 @@ export async function GET(
           orderBy: { confirmedAt: 'desc' },
           take: 10,
         },
+        legs: {
+          orderBy: { seq: 'asc' },
+          select: { id: true, seq: true, courier: true, trackingNumber: true, status: true, stage: true },
+        },
       },
     })
 
