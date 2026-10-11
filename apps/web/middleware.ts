@@ -1,48 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { checkRateLimit } from '@/lib/rate-limit';
 
-interface RateLimitRecord {
-  count: number;
-  resetAt: number;
-}
-
-// TODO(mainnet): in-memory state is per serverless instance, so limits are not shared
-// across instances. Move to Redis/Upstash (shared counter) before real traffic.
-const rateLimitMap = new Map<string, RateLimitRecord>();
-
-// Clean up stale entries every 5 minutes
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-let lastCleanup = Date.now();
-
-function getRateLimit(key: string, limit: number, windowMs: number): { allowed: boolean; retryAfter: number } {
-  const now = Date.now();
-
-  if (now - lastCleanup > CLEANUP_INTERVAL_MS) {
-    lastCleanup = now;
-    for (const [k, record] of rateLimitMap.entries()) {
-      if (now > record.resetAt) {
-        rateLimitMap.delete(k);
-      }
-    }
-  }
-
-  const record = rateLimitMap.get(key);
-
-  if (!record || now > record.resetAt) {
-    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, retryAfter: 0 };
-  }
-
-  if (record.count >= limit) {
-    const retryAfter = Math.ceil((record.resetAt - now) / 1000);
-    return { allowed: false, retryAfter };
-  }
-
-  record.count += 1;
-  return { allowed: true, retryAfter: 0 };
-}
-
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Only apply rate limiting to /api routes
@@ -66,7 +26,8 @@ export function middleware(request: NextRequest) {
   let limit = 60; // default 60 requests per minute
   let windowMs = 60 * 1000;
 
-  if (pathname.startsWith('/api/auth/')) {
+  // /api/auth/session is called on every page load to restore the session, so it keeps the default.
+  if (pathname.startsWith('/api/auth/') && pathname !== '/api/auth/session') {
     limit = 10;
   } else if (pathname === '/api/qris/parse') {
     limit = 20;
@@ -75,7 +36,7 @@ export function middleware(request: NextRequest) {
   }
 
   const rateLimitKey = `${ip}:${pathname.split('/').slice(0, 4).join('/')}`;
-  const { allowed, retryAfter } = getRateLimit(rateLimitKey, limit, windowMs);
+  const { allowed, retryAfter } = await checkRateLimit(rateLimitKey, limit, windowMs);
 
   if (!allowed) {
     return NextResponse.json(
