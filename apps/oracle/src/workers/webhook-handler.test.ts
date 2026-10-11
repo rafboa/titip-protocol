@@ -110,6 +110,7 @@ describe('handleWebhookEvent', () => {
     expect(await handleWebhookEvent('w1', deps)).toBe('dispute-opened')
     expect(deps.openDispute).toHaveBeenCalledOnce()
     expect(deps.notify).toHaveBeenCalledTimes(2)
+    expect(deps.notify).toHaveBeenCalledWith('GBUYER', 'ESCROW_RETURN_TO_SENDER', expect.stringContaining('dibuka otomatis'))
   })
 
   it('ignores RETURN_TO_SENDER once the escrow is terminal', async () => {

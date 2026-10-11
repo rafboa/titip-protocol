@@ -15,7 +15,7 @@ import { jntAdapter } from '../couriers/jnt.js'
 import { jneAdapter } from '../couriers/jne.js'
 import { sicepatAdapter } from '../couriers/sicepat.js'
 import { mockAdapter } from '../couriers/mock.js'
-import { confirmDelivery, submitConfirmDeliveryOnChain } from '../stellar/submit.js'
+import { confirmDelivery, submitConfirmDeliveryOnChain, submitDisputeOnChain } from '../stellar/submit.js'
 import { config } from '../config.js'
 import type { CourierAdapter } from '../couriers/types.js'
 import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
@@ -150,7 +150,12 @@ const webhookDeps: WebhookDeps = {
   syncDelivery: async (escrowId, payload, txHash) => {
     await confirmDelivery(escrowId, payload, txHash)
   },
-  // TODO: wire openDispute once the contract lets the oracle call dispute_escrow.
+  // Needs the contract version where dispute_escrow accepts the oracle as caller.
+  // The chain is the source of truth, so the DB status follows only after the tx succeeds.
+  openDispute: async (escrow) => {
+    await submitDisputeOnChain(escrow.contractAddress, escrow.contractEscrowId)
+    await prisma.escrow.update({ where: { id: escrow.id }, data: { status: 'DISPUTED' } })
+  },
 }
 
 async function processQueueJob(job: Job<TrackingQueueData>): Promise<void> {
