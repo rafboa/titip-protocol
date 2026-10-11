@@ -6,6 +6,8 @@ interface RateLimitRecord {
   resetAt: number;
 }
 
+// TODO(mainnet): in-memory state is per serverless instance, so limits are not shared
+// across instances. Move to Redis/Upstash (shared counter) before real traffic.
 const rateLimitMap = new Map<string, RateLimitRecord>();
 
 // Clean up stale entries every 5 minutes
@@ -53,8 +55,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+  // Prefer headers set by the platform edge (not client-controllable) over the first
+  // x-forwarded-for hop, which a caller can spoof to dodge the limit.
+  const ip =
+    request.headers.get('x-vercel-forwarded-for')?.split(',')[0].trim() ||
     request.headers.get('x-real-ip') ||
+    request.headers.get('x-forwarded-for')?.split(',').pop()?.trim() ||
     '127.0.0.1';
 
   let limit = 60; // default 60 requests per minute
