@@ -15,11 +15,19 @@ export type TrackingJobData = {
   courierCode: string
 }
 
+/** Job that handles one persisted webhook_events row (courier webhook). */
+export type WebhookJobData = {
+  webhookEventId: string
+}
+
+/** Everything that can sit on the tracking queue */
+export type TrackingQueueData = TrackingJobData | WebhookJobData
+
 /** Name of the BullMQ queue */
 export const TRACKING_QUEUE_NAME = 'tracking'
 
 /** Shared BullMQ queue instance — used by poller to enqueue jobs */
-export const trackingQueue = new Queue<TrackingJobData>(TRACKING_QUEUE_NAME, {
+export const trackingQueue = new Queue<TrackingQueueData>(TRACKING_QUEUE_NAME, {
   connection: {
     url: config.REDIS_URL,
   },

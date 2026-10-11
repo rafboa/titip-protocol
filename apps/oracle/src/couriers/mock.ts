@@ -4,22 +4,19 @@
 //
 // TODO(mainnet): Remove this adapter entirely — require real API keys in production.
 
-import type { CourierAdapter } from './types.js'
+import type { CourierAdapter, TrackingStatus } from './types.js'
 
 export const mockAdapter: CourierAdapter = {
   code: 'MOCK',
 
-  async fetchStatus(trackingNumber: string): Promise<{
-    delivered: boolean
-    statusText: string
-    raw: Record<string, unknown>
-  }> {
+  async fetchStatus(trackingNumber: string): Promise<TrackingStatus> {
     console.log(`[mock-courier] Simulating delivery for tracking: ${trackingNumber}`)
 
     // Simulate a brief network delay
     await new Promise((resolve) => setTimeout(resolve, 200))
 
     return {
+      stage: 'DELIVERED',
       delivered: true,
       statusText: 'DELIVERED — Paket telah sampai (mock)',
       raw: {

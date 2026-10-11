@@ -78,6 +78,7 @@ export const sicepatAdapter: CourierAdapter = {
     const delivered = DELIVERED_STATUS_CODES.has(currentStatus)
 
     return {
+      stage: delivered ? 'DELIVERED' : 'IN_TRANSIT', // v1.1: map intermediate courier codes to PICKUP/OUT_FOR_DELIVERY/RETURN_TO_SENDER
       delivered,
       statusText: result.waybill_status,
       raw: data as unknown as Record<string, unknown>,
