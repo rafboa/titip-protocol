@@ -40,14 +40,16 @@ function getNetworkPassphrase(): string {
 }
 
 /**
- * Returns the server signing keypair from env.
- * The SERVER signing keypair is the oracle keypair re-used here for SEP-10.
- * v1.1: Use a dedicated SEP10_SERVER_SECRET env var separate from the oracle key.
+ * Returns the SEP-10 server signing keypair from env.
+ * Uses a dedicated SEP10_SERVER_SECRET_KEY so the oracle key never lives on the web server.
+ * ORACLE_SECRET_KEY is accepted as a fallback outside production only (local dev convenience).
  */
 function getServerKeypair(): Keypair {
-  const secret = process.env.ORACLE_SECRET_KEY
+  const secret =
+    process.env.SEP10_SERVER_SECRET_KEY ??
+    (process.env.NODE_ENV !== 'production' ? process.env.ORACLE_SECRET_KEY : undefined)
   if (!secret) {
-    throw new Error('ORACLE_SECRET_KEY environment variable is not set')
+    throw new Error('SEP10_SERVER_SECRET_KEY environment variable is not set')
   }
   return Keypair.fromSecret(secret)
 }

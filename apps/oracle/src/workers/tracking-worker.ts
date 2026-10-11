@@ -5,7 +5,7 @@
 //  1. Picks the right courier adapter (JNT, JNE, SiCepat)
 //  2. Calls the courier's tracking API with a 10s timeout
 //  3. Logs the result to oracle_events regardless of outcome (claude.md spec)
-//  4. If delivered → calls confirmDelivery() → /api/oracle/confirm
+//  4. If delivered → signs confirm_delivery on-chain, then POSTs /api/oracle/confirm
 //  5. If not delivered → job is "done" (BullMQ will re-schedule via the poller)
 
 import { Worker, type Job, type WorkerOptions } from 'bullmq'
@@ -15,7 +15,7 @@ import { jntAdapter } from '../couriers/jnt.js'
 import { jneAdapter } from '../couriers/jne.js'
 import { sicepatAdapter } from '../couriers/sicepat.js'
 import { mockAdapter } from '../couriers/mock.js'
-import { confirmDelivery } from '../stellar/submit.js'
+import { confirmDelivery, submitConfirmDeliveryOnChain } from '../stellar/submit.js'
 import { config } from '../config.js'
 import type { CourierAdapter } from '../couriers/types.js'
 
@@ -83,10 +83,17 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
     return // Job complete; poller will re-enqueue on next cycle
   }
 
-  // Delivery confirmed — notify the web app
-  console.log(`[worker] Job ${job.id} — DELIVERED! Calling oracle/confirm...`)
+  // Delivery confirmed — release funds on-chain with the oracle key, then sync the web app
+  console.log(`[worker] Job ${job.id} — DELIVERED! Submitting confirm_delivery on-chain...`)
 
-  await confirmDelivery(escrowId, trackingResult.raw)
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    select: { contractAddress: true, contractEscrowId: true },
+  })
+  if (!escrow) throw new Error(`Escrow ${escrowId} not found in DB`)
+
+  const { txHash } = await submitConfirmDeliveryOnChain(escrow.contractAddress, escrow.contractEscrowId)
+  await confirmDelivery(escrowId, trackingResult.raw, txHash)
 
   console.log(`[worker] Job ${job.id} — escrow ${escrowId} confirmed and released ✓`)
 }
