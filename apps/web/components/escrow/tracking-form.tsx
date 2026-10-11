@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { WaybillScanner } from '@/components/escrow/waybill-scanner';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 const COURIER_CODES = ['JNT', 'JNE', 'SICEPAT', 'ANTERAJA', 'POS_INDONESIA'] as const;
@@ -83,6 +84,15 @@ export function TrackingForm({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      <WaybillScanner
+        disabled={isSubmitting}
+        onPick={(candidate) => {
+          setTrackingNumber(candidate.value);
+          // Only preselect the courier when the format identifies exactly one; the seller can change it.
+          if (!courierCode && candidate.couriers.length === 1) setCourierCode(candidate.couriers[0]);
+        }}
+      />
 
       <div className="mb-4 grid gap-4 sm:grid-cols-2">
         <div>
