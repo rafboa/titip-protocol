@@ -7,8 +7,11 @@ export function LanguageSwitcher() {
   const { locale, setLocale } = useTranslation();
 
   return (
-    <div className="glass flex items-center gap-0.5 rounded-md p-0.5 text-xs font-semibold">
+    <div role="group" aria-label="Language" className="glass flex items-center gap-0.5 rounded-md p-0.5 text-xs font-semibold">
       <button
+        type="button"
+        lang="en"
+        aria-label="English"
         onClick={() => setLocale('en')}
         aria-pressed={locale === 'en'}
         className={cn(
@@ -19,6 +22,9 @@ export function LanguageSwitcher() {
         EN
       </button>
       <button
+        type="button"
+        lang="id"
+        aria-label="Bahasa Indonesia"
         onClick={() => setLocale('id')}
         aria-pressed={locale === 'id'}
         className={cn(

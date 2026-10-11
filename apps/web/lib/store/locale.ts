@@ -13,6 +13,8 @@ export const useLocaleStore = create<LocaleState>((set) => ({
   locale: 'en',
   setLocale: (locale) => {
     localStorage.setItem('titip_locale', locale);
+    // Keep <html lang> in sync so screen readers pick the right pronunciation.
+    document.documentElement.lang = locale;
     set({ locale });
   },
 }));

@@ -163,6 +163,7 @@ export default function CreateEscrowPage() {
           <div className="min-w-0 flex-1">
             <h3 className="mb-2 text-lg font-semibold sm:text-xl">{t('createEscrow.pasteQris')}</h3>
             <Textarea
+              aria-label={t('createEscrow.pasteQris')}
               rows={6}
               placeholder="00020101021126660016ID.CO.SHOPEE.WWW0118936009180000000000..."
               value={qrisString}
