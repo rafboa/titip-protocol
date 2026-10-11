@@ -18,7 +18,11 @@ if (!escrowId) {
 }
 
 const WEB_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-const ORACLE_KEY = process.env.ORACLE_INTERNAL_API_KEY ?? 'titip_oracle_dev_key'
+const ORACLE_KEY = process.env.ORACLE_INTERNAL_API_KEY
+if (!ORACLE_KEY) {
+  console.error('ORACLE_INTERNAL_API_KEY is not set (load it from .env.local)')
+  process.exit(1)
+}
 
 async function confirmDelivery() {
   console.log('═══════════════════════════════════════════════════════════════')

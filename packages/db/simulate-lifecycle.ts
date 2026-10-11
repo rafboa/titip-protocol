@@ -17,7 +17,11 @@ import { PrismaClient } from '@prisma/client'
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const WEB_URL = process.env.APP_INTERNAL_API_URL ?? 'http://localhost:3001'
-const ORACLE_KEY = process.env.ORACLE_INTERNAL_API_KEY ?? 'titip_oracle_dev_key'
+const ORACLE_KEY = process.env.ORACLE_INTERNAL_API_KEY
+if (!ORACLE_KEY) {
+  console.error('ORACLE_INTERNAL_API_KEY is not set (load it from .env.local)')
+  process.exit(1)
+}
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? 'CDXU2C4KKP7M2NCQM2SD73I7H4UMCU6STLGAF66WPDFOTNYGFENIZV6Z'
 
 // Use test addresses (not on-chain — just for DB simulation)

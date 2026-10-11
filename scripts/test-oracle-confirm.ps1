@@ -4,11 +4,12 @@
 
 param(
     [string]$BaseUrl   = "http://localhost:3002",
-    [string]$OracleKey = "titip_oracle_dev_key",
+    [string]$OracleKey = $env:ORACLE_INTERNAL_API_KEY,
     [string]$EscrowId  = ""
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $OracleKey) { throw "Set ORACLE_INTERNAL_API_KEY or pass -OracleKey" }
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
