@@ -13,6 +13,9 @@
  * ORACLE_SECRET_KEY, which is the admin on contracts deployed by scripts/deploy-contract.ts).
  * TODO(mainnet): the admin must be a dedicated, hardware-backed or multisig account, not an oracle key.
  *
+ * The deployed contract must be a version that has set_oracles (see docs/multi-oracle.md); older
+ * deployments report that the function does not exist and must be redeployed.
+ *
  * Once a set exists the contract rejects confirm_delivery; every oracle node must call
  * approve_delivery (the oracle service does this automatically).
  */
@@ -44,6 +47,18 @@ if (!CONTRACT) {
 }
 const contract = new Contract(CONTRACT)
 
+/** Turns the host error for a contract that predates the M-of-N oracle into an actionable message. */
+function explainSimulationError(method: string, error: string): Error {
+  if (error.includes('non-existent contract function')) {
+    return new Error(
+      `The contract ${CONTRACT} has no ${method}: it was deployed before the M-of-N oracle existed.
+` +
+        'Build and redeploy it (docs/multi-oracle.md, step 0) and update NEXT_PUBLIC_CONTRACT_ADDRESS.',
+    )
+  }
+  return new Error(`${method} failed: ${error}`)
+}
+
 async function show(): Promise<void> {
   const dummy = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0')
   const tx = new TransactionBuilder(dummy, { fee: BASE_FEE, networkPassphrase: Networks.TESTNET })
@@ -51,7 +66,7 @@ async function show(): Promise<void> {
     .setTimeout(30)
     .build()
   const sim = await server.simulateTransaction(tx)
-  if (rpc.Api.isSimulationError(sim)) throw new Error(`get_oracle_set failed: ${sim.error}`)
+  if (rpc.Api.isSimulationError(sim)) throw explainSimulationError('get_oracle_set', sim.error)
   const retval = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval
   const value = retval ? scValToNative(retval) : null
   if (!value) {
@@ -93,7 +108,7 @@ async function set(thresholdArg: string, keys: string[]): Promise<void> {
     .build()
 
   const sim = await server.simulateTransaction(tx)
-  if (rpc.Api.isSimulationError(sim)) throw new Error(`set_oracles simulation failed: ${sim.error}`)
+  if (rpc.Api.isSimulationError(sim)) throw explainSimulationError('set_oracles', sim.error)
   const prepared = rpc.assembleTransaction(tx, sim).build()
   prepared.sign(admin)
 

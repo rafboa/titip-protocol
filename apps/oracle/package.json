@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "dotenv -e .env.local -- tsx watch src/index.ts",
-    "start": "dotenv -e .env.local -- node --loader tsx/esm src/index.ts",
+    "start": "dotenv -e .env.local -- node --import tsx src/index.ts",
     "build": "tsc",
     "lint": "tsc --noEmit",
     "test": "vitest run"

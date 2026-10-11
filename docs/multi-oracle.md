@@ -14,6 +14,18 @@ sebelumnya: satu oracle (`confirm_delivery`).
 
 ## Mencoba di testnet
 
+0. **Deploy kontrak versi baru.** Kontrak yang sudah ter-deploy sebelum fitur ini tidak punya
+   `set_oracles` (galatnya: *trying to invoke non-existent contract function*). Bangun dan deploy ulang:
+
+   ```bash
+   cd packages/contracts && cargo build --release --target wasm32v1-none && cd ../..
+   npx dotenv-cli -e .env.local -- npx tsx scripts/deploy-contract.ts
+   ```
+
+   Lalu ganti `NEXT_PUBLIC_CONTRACT_ADDRESS` di `.env.local` (dan di Vercel/Railway bila dipakai)
+   dengan alamat baru. Escrow lama tetap berada di kontrak lama dan tidak ikut pindah. Skrip deploy
+   menolak wasm yang lebih tua daripada kode sumber kontrak.
+
 1. Buat 3 kunci oracle (rahasia ditulis ke `.oracle-keys/`, tidak dicetak, tidak di-commit):
 
    ```bash
@@ -27,15 +39,20 @@ sebelumnya: satu oracle (`confirm_delivery`).
    npx dotenv-cli -e .env.local -- npx tsx scripts/set-oracle-set.ts show
    ```
 
-3. Jalankan satu service oracle per kunci. Setiap node memakai `ORACLE_SECRET_KEY` dan `ORACLE_NODE_ID`
-   dari berkasnya sendiri, di atas pengaturan bersama (`DATABASE_URL`, `REDIS_URL`,
-   `ORACLE_INTERNAL_API_KEY`, `APP_INTERNAL_API_URL`):
+3. Jalankan satu service oracle per kunci, masing-masing di terminal sendiri. Setiap node memakai
+   `ORACLE_SECRET_KEY` dan `ORACLE_NODE_ID` dari berkasnya sendiri, di atas pengaturan bersama
+   (`DATABASE_URL`, `REDIS_URL`, `ORACLE_INTERNAL_API_KEY`, `APP_INTERNAL_API_URL`).
+
+   **Urutan `-e` penting:** `dotenv-cli` memakai nilai dari berkas *pertama* yang mendefinisikan sebuah
+   variabel. Berkas kunci node harus di depan, kalau tidak, `ORACLE_SECRET_KEY` dari `.env.local`
+   (kunci deployer/admin) menang dan semua node berjalan dengan kunci yang sama.
 
    ```bash
-   npx dotenv-cli -e .env.local -e .oracle-keys/oracle-1.env -- npm run start -w @titip/oracle
+   npx dotenv-cli -e .oracle-keys/oracle-1.env -e .env.local -- npm run start -w @titip/oracle
    ```
 
-   Ulangi untuk `oracle-2.env` dan `oracle-3.env`.
+   Ulangi untuk `oracle-2.env` dan `oracle-3.env`. Log awal setiap node menampilkan `Node ID`,
+   periksa bahwa ketiganya berbeda.
 
 ## Perilaku service oracle
 
