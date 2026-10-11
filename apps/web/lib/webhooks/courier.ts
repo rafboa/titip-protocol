@@ -4,7 +4,7 @@
 import crypto from 'crypto'
 import { z } from 'zod'
 
-export type WebhookCourier = 'JNT' | 'JNE' | 'SICEPAT'
+export type WebhookCourier = 'JNT' | 'JNE' | 'SICEPAT' | 'ANTERAJA' | 'POS_INDONESIA'
 export type WebhookStage = 'PICKUP' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'RETURN_TO_SENDER'
 
 /** URL slug -> CourierCode enum value (only couriers with signed webhooks). */
@@ -12,6 +12,8 @@ const COURIER_SLUGS: Record<string, WebhookCourier> = {
   jnt: 'JNT',
   jne: 'JNE',
   sicepat: 'SICEPAT',
+  anteraja: 'ANTERAJA',
+  pos: 'POS_INDONESIA',
 }
 
 export function courierFromSlug(slug: string): WebhookCourier | null {

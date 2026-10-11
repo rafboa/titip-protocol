@@ -9,7 +9,7 @@
 //  5. If not delivered → job is "done" (BullMQ will re-schedule via the poller)
 
 import { Worker, type Job, type WorkerOptions } from 'bullmq'
-import { PrismaClient, type Prisma } from '@prisma/client'
+import { PrismaClient, type CourierCode, type Prisma } from '@prisma/client'
 import { TRACKING_QUEUE_NAME, type TrackingJobData, type TrackingQueueData } from '../queues/tracking.js'
 import { jntAdapter } from '../couriers/jnt.js'
 import { jneAdapter } from '../couriers/jne.js'
@@ -84,6 +84,17 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
     return // Job complete; poller will re-enqueue on next cycle
   }
 
+  // Multi-leg shipments: the primary tracking number being delivered is not the end of the
+  // journey. Release is decided per leg by handleWebhookEvent (webhook path) only.
+  // TODO(mainnet): poll the active leg too once courier APIs for the extra legs exist.
+  const legCount = await prisma.shipmentLeg.count({
+    where: { escrowId, status: { in: ['APPROVED', 'PROPOSED'] } },
+  })
+  if (legCount > 0) {
+    console.log(`[worker] Job ${job.id} — primary delivered but escrow ${escrowId} has ${legCount} extra leg(s); not releasing`)
+    return
+  }
+
   // Delivery confirmed — release funds on-chain with the oracle key, then sync the web app
   console.log(`[worker] Job ${job.id} — DELIVERED! Submitting confirm_delivery on-chain...`)
 
@@ -127,18 +138,59 @@ async function logOracleEvent(
 // ---------------------------------------------------------------------------
 const webhookDeps: WebhookDeps = {
   getEvent: (id) => prisma.webhookEvent.findUnique({ where: { id } }),
-  findEscrow: (courier, trackingNumber) =>
-    prisma.escrow.findFirst({
-      where: { courierCode: courier as 'JNT' | 'JNE' | 'SICEPAT', trackingNumber },
-      select: {
-        id: true,
-        status: true,
-        contractAddress: true,
-        contractEscrowId: true,
-        buyerAddress: true,
-        sellerAddress: true,
-      },
-    }),
+  resolveShipment: async (courier, trackingNumber) => {
+    const courierCode = courier as CourierCode
+    const escrowSelect = {
+      id: true,
+      status: true,
+      contractAddress: true,
+      contractEscrowId: true,
+      buyerAddress: true,
+      sellerAddress: true,
+      legs: { select: { seq: true, status: true } },
+    } as const
+
+    const primary = await prisma.escrow.findFirst({
+      where: { courierCode, trackingNumber },
+      orderBy: { createdAt: 'desc' },
+      select: escrowSelect,
+    })
+    if (primary) {
+      const { legs, ...escrow } = primary
+      return {
+        escrow,
+        kind: 'PRIMARY',
+        legId: null,
+        legStatus: null,
+        // With approved legs the primary is only the first hop.
+        isFinal: !legs.some((l) => l.status === 'APPROVED'),
+        hasPendingProposal: legs.some((l) => l.status === 'PROPOSED'),
+      }
+    }
+
+    const leg = await prisma.shipmentLeg.findFirst({
+      where: { courier: courierCode, trackingNumber },
+      orderBy: { createdAt: 'desc' },
+      include: { escrow: { select: escrowSelect } },
+    })
+    if (!leg) return null
+    const { legs, ...escrow } = leg.escrow
+    const lastApprovedSeq = legs.filter((l) => l.status === 'APPROVED').reduce((max, l) => Math.max(max, l.seq), 0)
+    return {
+      escrow,
+      kind: 'LEG',
+      legId: leg.id,
+      legStatus: leg.status,
+      isFinal: leg.status === 'APPROVED' && leg.seq === lastApprovedSeq,
+      hasPendingProposal: legs.some((l) => l.status === 'PROPOSED'),
+    }
+  },
+  recordLegStage: async (legId, stage) => {
+    await prisma.shipmentLeg.update({
+      where: { id: legId },
+      data: { stage, ...(stage === 'DELIVERED' ? { deliveredAt: new Date() } : {}) },
+    })
+  },
   markProcessed: async (id) => {
     await prisma.webhookEvent.update({ where: { id }, data: { processedAt: new Date() } })
   },
