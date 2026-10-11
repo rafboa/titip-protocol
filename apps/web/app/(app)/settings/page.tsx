@@ -11,15 +11,15 @@ import { Card } from '@/components/ui/card';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 
 export default function SettingsPage() {
-  const { isAuthenticated, publicKey, isConnecting, logout } = useAuthStore();
+  const { isAuthenticated, publicKey, isConnecting, isRestoring, logout } = useAuthStore();
   const { t } = useTranslation();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated && !isConnecting && !localStorage.getItem('titip_jwt')) {
+    if (!isAuthenticated && !isConnecting && !isRestoring) {
       router.push('/');
     }
-  }, [isAuthenticated, isConnecting, router]);
+  }, [isAuthenticated, isConnecting, isRestoring, router]);
 
   if (!isAuthenticated) return null;
 

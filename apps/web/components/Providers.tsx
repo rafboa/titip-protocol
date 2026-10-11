@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/store/auth';
 import { useLocaleStore } from '@/lib/store/locale';
-import { checkConnection } from '@/lib/stellar/freighter';
 import type { Locale } from '@/lib/i18n/translations';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -16,7 +15,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       },
     },
   }));
-  const { setAuth } = useAuthStore();
+  const { setAuth, setRestored } = useAuthStore();
   const setLocale = useLocaleStore((s) => s.setLocale);
 
   // Restore saved language preference on mount — defaults to English
@@ -28,27 +27,27 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, [setLocale]);
 
-  // Restore session from localStorage on mount (if Freighter is still connected)
+  // Restore the session from the HttpOnly cookie (JWT is never exposed to JavaScript).
   useEffect(() => {
-    const savedJwt = localStorage.getItem('titip_jwt');
-    const savedPubkey = localStorage.getItem('titip_pubkey');
-
-    if (savedJwt && savedPubkey) {
-      checkConnection()
-        .then((connected) => {
-          if (connected) {
-            setAuth(savedPubkey, savedJwt);
-          } else {
-            // Wallet disconnected — clear stale session
-            localStorage.removeItem('titip_jwt');
-            localStorage.removeItem('titip_pubkey');
-          }
-        })
-        .catch(() => {
-          // Freighter not available (SSR, not installed) — silently ignore
-        });
+    try {
+      // Drop tokens left in localStorage by earlier versions.
+      localStorage.removeItem('titip_jwt');
+      localStorage.removeItem('titip_pubkey');
+    } catch {
+      // Storage unavailable — nothing to clean.
     }
-  }, [setAuth]);
+    fetch('/api/auth/session')
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data: { address?: string } = await res.json();
+        return data.address ?? null;
+      })
+      .then((address) => {
+        if (address) setAuth(address);
+        else setRestored();
+      })
+      .catch(() => setRestored());
+  }, [setAuth, setRestored]);
 
   return (
     <QueryClientProvider client={queryClient}>

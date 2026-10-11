@@ -28,7 +28,6 @@ export function FundButton({
       setError(null);
 
       const buildRes = await fetch(`/api/escrow/${escrowId}/fund`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       const buildData = await buildRes.json();
       if (!buildRes.ok) throw new Error(buildData.error || 'Failed to build funding transaction');
@@ -39,7 +38,6 @@ export function FundButton({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ signedXdr }),
       });

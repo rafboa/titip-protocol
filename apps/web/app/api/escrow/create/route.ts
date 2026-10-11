@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { buildCreateEscrowTx, getCurrentLedger } from '@/lib/stellar/contracts/escrow'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
-import { verifyJwt } from '@/lib/auth/sep10'
+import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10'
 
 const CreateEscrowSchema = z.object({
   buyerAddress: z
@@ -25,7 +25,7 @@ const CreateEscrowSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = getAuthorizationHeader(request)
     if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
     }

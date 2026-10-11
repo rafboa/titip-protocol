@@ -60,11 +60,8 @@ export function ConnectWalletCard({ onSuccess }: { onSuccess?: () => void }) {
         throw new Error(data?.error || 'Verification failed');
       }
 
-      const { token } = await verifyRes.json();
-
-      localStorage.setItem('titip_jwt', token);
-      localStorage.setItem('titip_pubkey', pubkey);
-      setAuth(pubkey, token);
+      // The server has set the HttpOnly session cookie; nothing secret to keep here.
+      setAuth(pubkey);
 
       onSuccess?.();
     } catch (err) {

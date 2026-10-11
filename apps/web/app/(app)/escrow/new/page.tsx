@@ -29,7 +29,7 @@ type ParsedQris = {
 const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 
 export default function CreateEscrowPage() {
-  const { isAuthenticated, publicKey, isConnecting } = useAuthStore();
+  const { isAuthenticated, publicKey, isConnecting, isRestoring } = useAuthStore();
   const { t } = useTranslation();
   const router = useRouter();
 
@@ -44,10 +44,10 @@ export default function CreateEscrowPage() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated && !isConnecting && !localStorage.getItem('titip_jwt')) {
+    if (!isAuthenticated && !isConnecting && !isRestoring) {
       router.push('/');
     }
-  }, [isAuthenticated, isConnecting, router]);
+  }, [isAuthenticated, isConnecting, isRestoring, router]);
 
   const handleParse = async () => {
     if (!qrisString.trim()) return;
@@ -60,7 +60,6 @@ export default function CreateEscrowPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ payload: qrisString.trim() }),
       });
@@ -98,7 +97,6 @@ export default function CreateEscrowPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify(requestBody),
       });
@@ -114,7 +112,6 @@ export default function CreateEscrowPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ ...requestBody, signedCreateXdr }),
       });
@@ -131,7 +128,6 @@ export default function CreateEscrowPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ signedXdr: signedFundXdr }),
       });

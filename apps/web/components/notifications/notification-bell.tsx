@@ -88,7 +88,6 @@ export function NotificationBell() {
     queryKey: ['notifications', publicKey],
     queryFn: async () => {
       const res = await fetch(`/api/user/${publicKey}/notifications`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       if (!res.ok) throw new Error('Failed to fetch notifications');
       return res.json();
@@ -103,7 +102,6 @@ export function NotificationBell() {
     try {
       await fetch(`/api/user/${publicKey}/notifications`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       // Optimistic update — refetch in background
       await queryClient.invalidateQueries({ queryKey: ['notifications', publicKey] });
