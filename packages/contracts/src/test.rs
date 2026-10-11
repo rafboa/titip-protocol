@@ -29,7 +29,7 @@ fn setup() -> TestSetup<'static> {
     // Set initial ledger to something reasonable
     env.ledger().set(LedgerInfo {
         timestamp: 1_700_000_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: 100_000,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -366,7 +366,7 @@ fn test_claim_refund_after_timeout_funded() {
     // Advance ledger past timeout
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -405,7 +405,7 @@ fn test_claim_refund_after_timeout_shipped() {
     // Advance ledger past timeout
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -444,7 +444,7 @@ fn test_claim_refund_on_pending_fails() {
     // Advance past timeout
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -474,7 +474,7 @@ fn test_claim_refund_on_delivered_fails() {
     // Advance past timeout
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -499,7 +499,7 @@ fn test_claim_refund_already_refunded_fails() {
     // Advance past timeout
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -562,7 +562,7 @@ fn test_refunded_cannot_be_delivered() {
     // Advance past timeout and refund
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -639,7 +639,7 @@ fn test_full_refund_path() {
     // 2. Time passes... buyer waits, no delivery
     s.env.ledger().set(LedgerInfo {
         timestamp: 1_700_500_000,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: DEFAULT_TIMEOUT + 1,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -739,4 +739,111 @@ fn test_get_config_not_initialized() {
 
     let result = s.contract.try_get_config();
     assert_eq!(result, Err(Ok(EscrowError::NotInitialized)));
+}
+
+// ============================================================================
+// dispute_escrow tests
+// ============================================================================
+
+/// Helper: escrow funded and shipped, ready to be disputed.
+fn shipped_escrow(s: &TestSetup) -> u64 {
+    s.contract.initialize(&s.admin, &s.oracle, &s.token);
+    let escrow_id = s.contract.create_escrow(&s.buyer, &s.seller, &FIFTY_USDC, &DEFAULT_TIMEOUT);
+    s.contract.fund(&escrow_id);
+    s.contract.submit_tracking(
+        &escrow_id,
+        &String::from_str(&s.env, "JT1234567890"),
+        &String::from_str(&s.env, "jnt"),
+    );
+    escrow_id
+}
+
+#[test]
+fn test_dispute_by_buyer_succeeds() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    s.contract.dispute_escrow(&escrow_id, &s.buyer);
+    assert_eq!(s.contract.get_escrow(&escrow_id).status, EscrowStatus::Disputed);
+}
+
+#[test]
+fn test_dispute_by_seller_succeeds() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    s.contract.dispute_escrow(&escrow_id, &s.seller);
+    assert_eq!(s.contract.get_escrow(&escrow_id).status, EscrowStatus::Disputed);
+}
+
+#[test]
+fn test_dispute_by_oracle_succeeds_and_keeps_funds_locked() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+
+    s.contract.dispute_escrow(&escrow_id, &s.oracle);
+
+    assert_eq!(s.contract.get_escrow(&escrow_id).status, EscrowStatus::Disputed);
+    // Funds stay in the contract; nobody was paid.
+    let token_client = token::Client::new(&s.env, &s.token);
+    assert_eq!(token_client.balance(&s.contract.address), FIFTY_USDC);
+    assert_eq!(token_client.balance(&s.seller), 0);
+}
+
+#[test]
+fn test_dispute_by_stranger_fails() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    let stranger = Address::generate(&s.env);
+    let result = s.contract.try_dispute_escrow(&escrow_id, &stranger);
+    assert_eq!(result, Err(Ok(EscrowError::Unauthorized)));
+}
+
+#[test]
+fn test_dispute_by_old_oracle_fails_after_update() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    let new_oracle = Address::generate(&s.env);
+    s.contract.update_oracle(&new_oracle);
+    let result = s.contract.try_dispute_escrow(&escrow_id, &s.oracle);
+    assert_eq!(result, Err(Ok(EscrowError::Unauthorized)));
+    s.contract.dispute_escrow(&escrow_id, &new_oracle);
+}
+
+#[test]
+fn test_oracle_cannot_dispute_delivered_escrow() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    s.contract.confirm_delivery(&escrow_id);
+    let result = s.contract.try_dispute_escrow(&escrow_id, &s.oracle);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
+}
+
+#[test]
+fn test_oracle_cannot_dispute_pending_escrow() {
+    let s = setup();
+    s.contract.initialize(&s.admin, &s.oracle, &s.token);
+    let escrow_id = s.contract.create_escrow(&s.buyer, &s.seller, &FIFTY_USDC, &DEFAULT_TIMEOUT);
+    let result = s.contract.try_dispute_escrow(&escrow_id, &s.oracle);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
+}
+
+#[test]
+fn test_oracle_dispute_then_admin_resolves_for_buyer() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    s.contract.dispute_escrow(&escrow_id, &s.oracle);
+
+    s.contract.resolve_dispute(&escrow_id, &s.buyer);
+
+    let token_client = token::Client::new(&s.env, &s.token);
+    assert_eq!(token_client.balance(&s.contract.address), 0);
+    assert_eq!(token_client.balance(&s.buyer), 10_000_000_000_i128);
+}
+
+#[test]
+fn test_disputed_escrow_cannot_be_delivered() {
+    let s = setup();
+    let escrow_id = shipped_escrow(&s);
+    s.contract.dispute_escrow(&escrow_id, &s.oracle);
+    let result = s.contract.try_confirm_delivery(&escrow_id);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
 }
