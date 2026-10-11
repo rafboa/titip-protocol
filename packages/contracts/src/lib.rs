@@ -377,15 +377,23 @@ impl TitipEscrowContract {
     // Dispute & Resolution (v1.1)
     // ------------------------------------------------------------------------
 
-    /// Dispute an escrow transaction. Can be called by buyer or seller.
-    /// 
+    /// Dispute an escrow transaction. Can be called by the buyer, the seller, or the
+    /// whitelisted oracle (which freezes the escrow when the courier reports a return to
+    /// sender). The oracle can only move funds INTO dispute; it still cannot release them:
+    /// only `resolve_dispute` (admin) pays out a disputed escrow.
+    ///
     /// Transitions: FUNDED | SHIPPED -> DISPUTED.
     pub fn dispute_escrow(env: Env, escrow_id: u64, caller: Address) -> Result<(), EscrowError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(EscrowError::NotInitialized)?;
         let mut escrow = Self::load_escrow(&env, escrow_id)?;
 
         caller.require_auth();
 
-        if caller != escrow.buyer && caller != escrow.seller {
+        if caller != escrow.buyer && caller != escrow.seller && caller != config.oracle {
             return Err(EscrowError::Unauthorized);
         }
 

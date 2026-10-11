@@ -60,6 +60,47 @@ async function getOnChainStatus(contractAddress: string, contractEscrowId: bigin
   return 'Unknown'
 }
 
+/** Signs `method` as the oracle, simulates, submits and waits for success. Returns the tx hash. */
+async function invokeAsOracle(
+  contractAddress: string,
+  method: string,
+  args: ReturnType<typeof nativeToScVal>[]
+): Promise<string> {
+  const contract = new Contract(contractAddress)
+  const account = await server.getAccount(oracleKeypair.publicKey())
+  const tx = new TransactionBuilder(account, {
+    fee: String(Number(BASE_FEE) * FEE_MULTIPLIER),
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build()
+
+  // Simulate first: gives the footprint and resource fees.
+  const simulated = await server.simulateTransaction(tx)
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`${method} simulation failed: ${simulated.error}`)
+  }
+
+  const prepared = rpc.assembleTransaction(tx, simulated).build()
+  prepared.sign(oracleKeypair)
+
+  const sent = await server.sendTransaction(prepared)
+  if (sent.status === 'ERROR') {
+    throw new Error(`${method} submission failed: ${JSON.stringify(sent.errorResult)}`)
+  }
+
+  let result = await server.getTransaction(sent.hash)
+  for (let i = 0; i < POLL_ATTEMPTS && result.status === 'NOT_FOUND'; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    result = await server.getTransaction(sent.hash)
+  }
+  if (result.status !== 'SUCCESS') {
+    throw new Error(`${method} did not succeed: ${result.status}`)
+  }
+  return sent.hash
+}
+
 /**
  * Signs and submits `confirm_delivery` as the whitelisted oracle.
  * Idempotent: if the escrow is already Delivered on-chain (e.g. a previous attempt
@@ -74,40 +115,32 @@ export async function submitConfirmDeliveryOnChain(
   if (status !== 'Shipped') {
     throw new Error(`Escrow ${contractEscrowId} is "${status}" on chain; expected "Shipped"`)
   }
+  const txHash = await invokeAsOracle(contractAddress, 'confirm_delivery', [
+    nativeToScVal(contractEscrowId, { type: 'u64' }),
+  ])
+  return { txHash }
+}
 
-  const contract = new Contract(contractAddress)
-  const account = await server.getAccount(oracleKeypair.publicKey())
-  const tx = new TransactionBuilder(account, {
-    fee: String(Number(BASE_FEE) * FEE_MULTIPLIER),
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(contract.call('confirm_delivery', nativeToScVal(contractEscrowId, { type: 'u64' })))
-    .setTimeout(30)
-    .build()
-
-  // Simulate first: gives the footprint and resource fees.
-  const simulated = await server.simulateTransaction(tx)
-  if (rpc.Api.isSimulationError(simulated)) {
-    throw new Error(`confirm_delivery simulation failed: ${simulated.error}`)
+/**
+ * Signs and submits `dispute_escrow` as the whitelisted oracle (e.g. on return-to-sender).
+ * The oracle can only freeze funds into Disputed; the admin resolves it. Idempotent: if the
+ * escrow is already Disputed on-chain no transaction is sent and txHash is null.
+ * Requires a contract version where dispute_escrow accepts the oracle as caller.
+ */
+export async function submitDisputeOnChain(
+  contractAddress: string,
+  contractEscrowId: bigint
+): Promise<{ txHash: string | null }> {
+  const status = await getOnChainStatus(contractAddress, contractEscrowId)
+  if (status === 'Disputed') return { txHash: null }
+  if (status !== 'Funded' && status !== 'Shipped') {
+    throw new Error(`Escrow ${contractEscrowId} is "${status}" on chain; cannot dispute`)
   }
-
-  const prepared = rpc.assembleTransaction(tx, simulated).build()
-  prepared.sign(oracleKeypair)
-
-  const sent = await server.sendTransaction(prepared)
-  if (sent.status === 'ERROR') {
-    throw new Error(`confirm_delivery submission failed: ${JSON.stringify(sent.errorResult)}`)
-  }
-
-  let result = await server.getTransaction(sent.hash)
-  for (let i = 0; i < POLL_ATTEMPTS && result.status === 'NOT_FOUND'; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    result = await server.getTransaction(sent.hash)
-  }
-  if (result.status !== 'SUCCESS') {
-    throw new Error(`confirm_delivery did not succeed: ${result.status}`)
-  }
-  return { txHash: sent.hash }
+  const txHash = await invokeAsOracle(contractAddress, 'dispute_escrow', [
+    nativeToScVal(contractEscrowId, { type: 'u64' }),
+    nativeToScVal(oracleKeypair.publicKey(), { type: 'address' }),
+  ])
+  return { txHash }
 }
 
 /**
