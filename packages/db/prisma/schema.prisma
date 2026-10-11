@@ -68,9 +68,14 @@ model WebhookEvent {
   courier     CourierCode
   eventId     String      @map("event_id")
   stage       String
+  trackingNumber String   @map("tracking_number")
   payloadHash String      @map("payload_hash")
+  payload     Json
   receivedAt  DateTime    @default(now()) @map("received_at")
+  /// Set by the oracle service once the event has been handled (or found moot).
+  processedAt DateTime?   @map("processed_at")
   @@unique([courier, eventId])
+  @@index([processedAt])
   @@map("webhook_events")
 }
 
