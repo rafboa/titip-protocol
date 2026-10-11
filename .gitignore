@@ -4,6 +4,9 @@ node_modules
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+graphify-out/
 
 # Next.js
 .next
@@ -29,3 +32,7 @@ titip-master-prompt.md
 .vercel
 SYSTEM_INTERNAL.md
 INTERNAL_*.md
+
+# Claude Code local state
+.claude/autoharness/
+**/.claude/autoharness/

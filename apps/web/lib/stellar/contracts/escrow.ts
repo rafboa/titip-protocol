@@ -414,10 +414,14 @@ export async function getOnChainEscrow(contractEscrowId: bigint): Promise<OnChai
   }
 
   const native = scValToNative(simSuccess.result.retval)
+  // Unit enum variants decode as ['Shipped'] (a one-element array); tolerate a plain
+  // string or { Shipped: ... } too in case the SDK decoding changes.
   const statusRaw = native.status
   let statusStr = 'Pending'
   if (typeof statusRaw === 'string') {
     statusStr = statusRaw
+  } else if (Array.isArray(statusRaw) && typeof statusRaw[0] === 'string') {
+    statusStr = statusRaw[0]
   } else if (typeof statusRaw === 'object' && statusRaw !== null) {
     statusStr = Object.keys(statusRaw)[0] ?? 'Pending'
   }

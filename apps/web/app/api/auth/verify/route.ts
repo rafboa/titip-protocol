@@ -1,12 +1,12 @@
 // POST /api/auth/verify
 // Accepts a signed SEP-10 challenge transaction XDR.
 // Verifies both the server signature and the client's Freighter signature.
-// On success, upserts the User record in PostgreSQL and returns a JWT.
+// On success, upserts the User record in PostgreSQL and sets the session JWT as an HttpOnly cookie.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
-import { verifyChallenge } from '@/lib/auth/sep10'
+import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, verifyChallenge } from '@/lib/auth/sep10'
 
 const VerifySchema = z.object({
   signedXdr: z.string().min(1, 'signedXdr is required'),
@@ -41,7 +41,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       create: { stellarAddress: address },
     })
 
-    return NextResponse.json({ token, address })
+    // The JWT travels only in an HttpOnly cookie so page scripts (and any XSS) cannot read it.
+    const response = NextResponse.json({ address })
+    response.cookies.set(SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: SESSION_MAX_AGE_SECONDS,
+    })
+    return response
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Verification failed'
 

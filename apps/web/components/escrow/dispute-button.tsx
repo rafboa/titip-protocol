@@ -25,7 +25,6 @@ export function DisputeButton({
       setError(null);
 
       const getRes = await fetch(`/api/escrow/${escrowId}/dispute`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       const getData = await getRes.json();
 
@@ -37,7 +36,6 @@ export function DisputeButton({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ signedXdr }),
       });

@@ -20,7 +20,6 @@ export function RefundButton({ escrowId, onRefunded }: { escrowId: string; onRef
       setError(null);
 
       const buildRes = await fetch(`/api/escrow/${escrowId}/refund`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       const buildData = await buildRes.json();
       if (!buildRes.ok) throw new Error(buildData.error || 'Failed to build refund transaction');
@@ -32,7 +31,6 @@ export function RefundButton({ escrowId, onRefunded }: { escrowId: string; onRef
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ signedXdr }),
       });

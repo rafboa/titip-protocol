@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { fetchStellarToml } from '@/lib/stellar/tempo';
 
 export default function WalletPage() {
-  const { isAuthenticated, publicKey, isConnecting } = useAuthStore();
+  const { isAuthenticated, publicKey, isConnecting, isRestoring } = useAuthStore();
   const { t } = useTranslation();
   const router = useRouter();
 
@@ -23,10 +23,10 @@ export default function WalletPage() {
   const [isLoadingTempo, setIsLoadingTempo] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated && !isConnecting && !localStorage.getItem('titip_jwt')) {
+    if (!isAuthenticated && !isConnecting && !isRestoring) {
       router.push('/');
     }
-  }, [isAuthenticated, isConnecting, router]);
+  }, [isAuthenticated, isConnecting, isRestoring, router]);
 
   const { data: balanceData, isLoading: isLoadingBalance } = useQuery({
     queryKey: ['balance', publicKey],

@@ -51,7 +51,6 @@ export function TrackingForm({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('titip_jwt')}`,
         },
         body: JSON.stringify({ trackingNumber: trackingNumber.trim(), courierCode, signedXdr }),
       });

@@ -3,7 +3,7 @@ import { prisma } from '@titip/db'
 import { z } from 'zod'
 import { submitCreateEscrowTx, buildFundEscrowTx, getOnChainEscrow } from '@/lib/stellar/contracts/escrow'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
-import { verifyJwt } from '@/lib/auth/sep10'
+import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10'
 
 const ConfirmEscrowSchema = z.object({
   signedCreateXdr: z.string().min(1, 'Signed create transaction XDR is required'),
@@ -19,7 +19,7 @@ const ConfirmEscrowSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = getAuthorizationHeader(request)
     if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
     }

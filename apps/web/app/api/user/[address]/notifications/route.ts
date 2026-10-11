@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
-import { verifyJwt } from '@/lib/auth/sep10'
+import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { address: string } | Promise<{ address: string }> }
 ) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = getAuthorizationHeader(request)
     if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
     }
@@ -48,7 +48,7 @@ export async function PATCH(
   { params }: { params: { address: string } | Promise<{ address: string }> }
 ) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = getAuthorizationHeader(request)
     if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
     }

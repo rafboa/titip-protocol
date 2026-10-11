@@ -28,6 +28,10 @@ const CHALLENGE_EXPIRY_SECONDS = 5 * 60
 // JWT issued after verification is valid for 7 days
 const JWT_EXPIRY = '7d'
 
+/** HttpOnly cookie that carries the session JWT (never readable from JavaScript). */
+export const SESSION_COOKIE = 'titip_session'
+export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+
 // Manage data key used in the challenge operation
 const SEP10_MANAGE_DATA_KEY = 'titip_auth'
 
@@ -40,14 +44,16 @@ function getNetworkPassphrase(): string {
 }
 
 /**
- * Returns the server signing keypair from env.
- * The SERVER signing keypair is the oracle keypair re-used here for SEP-10.
- * v1.1: Use a dedicated SEP10_SERVER_SECRET env var separate from the oracle key.
+ * Returns the SEP-10 server signing keypair from env.
+ * Uses a dedicated SEP10_SERVER_SECRET_KEY so the oracle key never lives on the web server.
+ * ORACLE_SECRET_KEY is accepted as a fallback outside production only (local dev convenience).
  */
 function getServerKeypair(): Keypair {
-  const secret = process.env.ORACLE_SECRET_KEY
+  const secret =
+    process.env.SEP10_SERVER_SECRET_KEY ??
+    (process.env.NODE_ENV !== 'production' ? process.env.ORACLE_SECRET_KEY : undefined)
   if (!secret) {
-    throw new Error('ORACLE_SECRET_KEY environment variable is not set')
+    throw new Error('SEP10_SERVER_SECRET_KEY environment variable is not set')
   }
   return Keypair.fromSecret(secret)
 }
@@ -255,4 +261,31 @@ export async function verifyJwt(authHeader: string): Promise<JwtPayload> {
   }
 
   return payload as JwtPayload
+}
+
+/**
+ * Returns the Authorization header value for a request, falling back to the
+ * HttpOnly session cookie. Cookie-sourced credentials on state-changing methods
+ * also require a same-origin `Origin` header (CSRF defence in depth on top of
+ * SameSite=Strict). Returns null when no usable credential is present.
+ */
+export function getAuthorizationHeader(request: Request): string | null {
+  const header = request.headers.get('authorization')
+  if (header) return header
+
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const match = cookieHeader
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+  if (!match) return null
+  const token = decodeURIComponent(match.slice(SESSION_COOKIE.length + 1))
+  if (!token) return null
+
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    const origin = request.headers.get('origin')
+    const host = request.headers.get('host')
+    if (!origin || !host || new URL(origin).host !== host) return null
+  }
+  return `Bearer ${token}`
 }

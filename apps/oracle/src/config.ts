@@ -16,6 +16,8 @@ const EnvSchema = z.object({
   STELLAR_NETWORK: z
     .enum(['testnet', 'mainnet'])
     .default('testnet'),
+  // TODO(mainnet): set to a mainnet Soroban RPC endpoint
+  SOROBAN_RPC_URL: z.string().default('https://soroban-testnet.stellar.org'),
 
   // Internal API (oracle → Next.js web app)
   APP_INTERNAL_API_URL: z.string().default('http://localhost:3000'),

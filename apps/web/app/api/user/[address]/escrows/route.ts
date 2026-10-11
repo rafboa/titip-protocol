@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
-import { verifyJwt } from '@/lib/auth/sep10'
+import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10'
 
 const ESCROW_STATUSES = ['PENDING', 'FUNDED', 'SHIPPED', 'DELIVERED', 'REFUNDED'] as const
 
@@ -17,7 +17,7 @@ export async function GET(
   { params }: { params: { address: string } | Promise<{ address: string }> }
 ) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = getAuthorizationHeader(request)
     if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 })
     }

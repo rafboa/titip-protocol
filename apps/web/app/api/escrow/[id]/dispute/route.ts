@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@titip/db';
 import { buildDisputeEscrowTx, submitSignedTx } from '@/lib/stellar/contracts/escrow';
-import { verifyJwt } from '@/lib/auth/sep10';
+import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10';
 
 export async function GET(
   request: NextRequest,
@@ -9,7 +9,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const authHeader = request.headers.get('authorization');
+    const authHeader = getAuthorizationHeader(request);
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const payload = await verifyJwt(authHeader);
@@ -45,7 +45,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authHeader = request.headers.get('authorization');
+    const authHeader = getAuthorizationHeader(request);
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized: missing authorization header' }, { status: 401 });
 
     let payload;

@@ -38,22 +38,21 @@ type EscrowDetail = {
 
 export default function EscrowDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isAuthenticated, publicKey, isConnecting } = useAuthStore();
+  const { isAuthenticated, publicKey, isConnecting, isRestoring } = useAuthStore();
   const { t, locale } = useTranslation();
   const router = useRouter();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!isAuthenticated && !isConnecting && !localStorage.getItem('titip_jwt')) {
+    if (!isAuthenticated && !isConnecting && !isRestoring) {
       router.push('/');
     }
-  }, [isAuthenticated, isConnecting, router]);
+  }, [isAuthenticated, isConnecting, isRestoring, router]);
 
   const { data: escrow, isLoading, error } = useQuery<EscrowDetail>({
     queryKey: ['escrow', id],
     queryFn: async () => {
       const res = await fetch(`/api/escrow/${id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('titip_jwt')}` },
       });
       if (!res.ok) throw new Error('Failed to fetch escrow');
       return res.json();

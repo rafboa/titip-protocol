@@ -1,7 +1,9 @@
 // POST /api/oracle/confirm
 // Internal endpoint called by the oracle service when delivery is confirmed.
 // Protected by ORACLE_INTERNAL_API_KEY in the Authorization header.
-// Updates escrow status to DELIVERED, records an oracle event, and notifies both parties.
+// The oracle service has already signed and submitted confirm_delivery on-chain with its
+// own key; this endpoint never holds the oracle secret. It re-reads the contract state
+// (the source of truth) and only then syncs the DB, records an oracle event and notifies parties.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
@@ -10,6 +12,8 @@ import { z } from 'zod'
 
 const ConfirmSchema = z.object({
   escrowId: z.string().min(1, 'escrowId is required'),
+  // Stellar tx hash (64 hex chars). Absent when the oracle found the escrow already Delivered on-chain.
+  txHash: z.string().regex(/^[0-9a-fA-F]{64}$/, 'txHash must be a 64-char hex string').optional(),
   // v1.1: Accept courierResponse JSON for audit trail
   courierResponse: z.record(z.string(), z.any()).optional(),
 })
@@ -47,7 +51,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { escrowId, courierResponse } = parsed.data
+    const { escrowId, courierResponse, txHash } = parsed.data
 
     const escrow = await prisma.escrow.findUnique({ where: { id: escrowId } })
 
@@ -62,28 +66,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const oracleSecret = process.env.ORACLE_SECRET_KEY
-    if (!oracleSecret) {
-      console.error('[POST /api/oracle/confirm] ORACLE_SECRET_KEY is missing; cannot release funds on-chain')
-      return NextResponse.json(
-        { error: 'Server misconfiguration: ORACLE_SECRET_KEY missing' },
-        { status: 500 }
-      )
-    }
-
-    let txHashRelease: string
-    try {
-      const { submitConfirmDeliveryTx } = await import('@/lib/stellar/contracts/escrow')
-      txHashRelease = await submitConfirmDeliveryTx(
-        BigInt(escrow.contractEscrowId.toString()),
-        oracleSecret
-      )
-    } catch (err: unknown) {
-      console.error('[POST /api/oracle/confirm] Failed to submit confirm_delivery on-chain:', err)
-      return NextResponse.json(
-        { error: 'Failed to submit on-chain transaction' },
-        { status: 502 }
-      )
+    // Chain wins: only sync the DB once the contract itself says Delivered.
+    // Mock mode (demo/dev scripts) has no chain to verify and is refused in production.
+    const mockMode =
+      process.env.NEXT_PUBLIC_USE_MOCK_CONTRACT === 'true' && process.env.NODE_ENV !== 'production'
+    if (!mockMode) {
+      try {
+        const { getOnChainEscrow } = await import('@/lib/stellar/contracts/escrow')
+        const onChain = await getOnChainEscrow(BigInt(escrow.contractEscrowId.toString()))
+        if (onChain.status !== 'Delivered') {
+          return NextResponse.json(
+            { error: `On-chain status is "${onChain.status}", not "Delivered"` },
+            { status: 409 }
+          )
+        }
+      } catch (err: unknown) {
+        console.error('[POST /api/oracle/confirm] Failed to verify on-chain state:', err)
+        return NextResponse.json({ error: 'Failed to verify on-chain state' }, { status: 502 })
+      }
     }
 
     const [updated] = await prisma.$transaction([
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
         data: {
           status: 'DELIVERED',
           deliveredAt: new Date(),
-          txHashRelease: txHashRelease,
+          ...(txHash ? { txHashRelease: txHash } : {}),
         },
       }),
       prisma.oracleEvent.create({
