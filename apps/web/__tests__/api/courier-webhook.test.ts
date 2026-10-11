@@ -43,6 +43,8 @@ beforeEach(() => {
   process.env.COURIER_WEBHOOK_SECRET_JNT = SECRET
   process.env.COURIER_WEBHOOK_SECRET_JNE = SECRET
   process.env.COURIER_WEBHOOK_SECRET_SICEPAT = SECRET
+  process.env.COURIER_WEBHOOK_SECRET_ANTERAJA = SECRET
+  process.env.COURIER_WEBHOOK_SECRET_POS_INDONESIA = SECRET
   prismaMock.webhookEvent.create.mockResolvedValue({ id: 'w1' })
 })
 
@@ -60,6 +62,15 @@ describe('POST /api/webhooks/courier/[courier]', () => {
     const data = prismaMock.webhookEvent.create.mock.calls[0][0].data
     expect(data).toMatchObject({ courier: 'JNT', eventId: 'evt-1', stage, trackingNumber: 'JP1234567890' })
     expect(data.payloadHash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it.each([
+    ['pos', 'POS_INDONESIA'],
+    ['anteraja', 'ANTERAJA'],
+  ])('accepts signed webhooks on the /%s route', async (slug, courier) => {
+    const res = await call(slug, event('IN_TRANSIT'))
+    expect(res.status).toBe(202)
+    expect(prismaMock.webhookEvent.create.mock.calls[0][0].data.courier).toBe(courier)
   })
 
   it('rejects a missing signature', async () => {

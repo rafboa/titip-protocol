@@ -43,6 +43,7 @@ model Escrow {
   buyer              User          @relation("BuyerEscrows",  fields: [buyerAddress],  references: [stellarAddress])
   seller             User          @relation("SellerEscrows", fields: [sellerAddress], references: [stellarAddress])
   oracleEvents       OracleEvent[]
+  legs               ShipmentLeg[]
   @@index([buyerAddress])
   @@index([sellerAddress])
   @@index([status])
@@ -77,6 +78,32 @@ model WebhookEvent {
   @@unique([courier, eventId])
   @@index([processedAt])
   @@map("webhook_events")
+}
+
+/// Extra shipping legs after the escrow's own tracking (seq 0 is implicit). The seller proposes a
+/// leg, the buyer must approve it; delivery of the last approved leg releases the funds.
+model ShipmentLeg {
+  id             String      @id @default(cuid())
+  escrowId       String      @map("escrow_id")
+  seq            Int
+  courier        CourierCode
+  trackingNumber String      @map("tracking_number")
+  status         LegStatus   @default(PROPOSED)
+  /// Last normalised stage reported by the courier (PICKUP, IN_TRANSIT, ... DELIVERED).
+  stage          String?
+  deliveredAt    DateTime?   @map("delivered_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  decidedAt      DateTime?   @map("decided_at")
+  escrow         Escrow      @relation(fields: [escrowId], references: [id])
+  @@unique([escrowId, seq])
+  @@index([courier, trackingNumber])
+  @@map("shipment_legs")
+}
+
+enum LegStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
 }
 
 model QrisSession {
