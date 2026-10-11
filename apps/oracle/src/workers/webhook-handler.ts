@@ -96,7 +96,9 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
         outcome = 'return-notified'
       }
       const message =
-        'Paket dikembalikan ke pengirim oleh kurir. Dana tetap aman di escrow; ajukan dispute dari halaman escrow.'
+        outcome === 'dispute-opened'
+          ? 'Paket dikembalikan ke pengirim oleh kurir. Dispute dibuka otomatis dan dana dibekukan di escrow sampai diselesaikan admin.'
+          : 'Paket dikembalikan ke pengirim oleh kurir. Dana tetap aman di escrow; ajukan dispute dari halaman escrow.'
       await deps.notify(escrow.buyerAddress, 'ESCROW_RETURN_TO_SENDER', message)
       await deps.notify(escrow.sellerAddress, 'ESCROW_RETURN_TO_SENDER', message)
     } else {
