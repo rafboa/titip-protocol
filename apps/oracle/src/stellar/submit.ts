@@ -51,7 +51,9 @@ async function getOnChainStatus(contractAddress: string, contractEscrowId: bigin
   if (!retval) throw new Error(`Escrow ${contractEscrowId} not found on chain`)
 
   const native = scValToNative(retval) as { status: unknown }
+  // Unit enum variants decode as ['Shipped'] (a one-element array).
   if (typeof native.status === 'string') return native.status
+  if (Array.isArray(native.status) && typeof native.status[0] === 'string') return native.status[0]
   if (typeof native.status === 'object' && native.status !== null) {
     return Object.keys(native.status)[0] ?? 'Unknown'
   }
