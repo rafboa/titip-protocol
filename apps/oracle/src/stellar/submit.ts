@@ -15,6 +15,7 @@ import {
   scValToNative,
 } from '@stellar/stellar-sdk'
 import { config } from '../config.js'
+import { decideDeliveryStep, isAlreadyDeliveredResponse, parseApprovals, parseOracleSet } from './quorum.js'
 
 // TODO(mainnet): verify passphrase, RPC URL and fee multiplier before deploying.
 const NETWORK_PASSPHRASE =
@@ -33,24 +34,35 @@ type ConfirmDeliveryResult = {
   txHash: string | null
 }
 
-/** Returns the contract's escrow status ("Shipped", "Delivered", ...). */
-async function getOnChainStatus(contractAddress: string, contractEscrowId: bigint): Promise<string> {
+/** Read-only contract call via simulation. A throwaway account is enough. */
+async function readContract(
+  contractAddress: string,
+  method: string,
+  args: ReturnType<typeof nativeToScVal>[]
+): Promise<unknown> {
   const contract = new Contract(contractAddress)
-  // Read-only simulation: a throwaway account is enough.
   const dummy = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0')
   const tx = new TransactionBuilder(dummy, { fee: BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE })
-    .addOperation(contract.call('get_escrow', nativeToScVal(contractEscrowId, { type: 'u64' })))
+    .addOperation(contract.call(method, ...args))
     .setTimeout(30)
     .build()
 
   const simulated = await server.simulateTransaction(tx)
   if (rpc.Api.isSimulationError(simulated)) {
-    throw new Error(`get_escrow simulation failed: ${simulated.error}`)
+    throw new Error(`${method} simulation failed: ${simulated.error}`)
   }
   const retval = (simulated as rpc.Api.SimulateTransactionSuccessResponse).result?.retval
-  if (!retval) throw new Error(`Escrow ${contractEscrowId} not found on chain`)
+  return retval ? scValToNative(retval) : undefined
+}
 
-  const native = scValToNative(retval) as { status: unknown }
+/** Returns the contract's escrow status ("Shipped", "Delivered", ...). */
+async function getOnChainStatus(contractAddress: string, contractEscrowId: bigint): Promise<string> {
+  const value = await readContract(contractAddress, 'get_escrow', [
+    nativeToScVal(contractEscrowId, { type: 'u64' }),
+  ])
+  if (!value) throw new Error(`Escrow ${contractEscrowId} not found on chain`)
+
+  const native = value as { status: unknown }
   // Unit enum variants decode as ['Shipped'] (a one-element array).
   if (typeof native.status === 'string') return native.status
   if (Array.isArray(native.status) && typeof native.status[0] === 'string') return native.status[0]
@@ -101,24 +113,77 @@ async function invokeAsOracle(
   return sent.hash
 }
 
+export type DeliveryResult = {
+  /** True when the funds are released on-chain (by this node or by the other oracles). */
+  released: boolean
+  /** Hash of the transaction this node sent, or null if it sent none. */
+  txHash: string | null
+}
+
 /**
- * Signs and submits `confirm_delivery` as the whitelisted oracle.
- * Idempotent: if the escrow is already Delivered on-chain (e.g. a previous attempt
- * landed but the web callback failed), no transaction is sent and txHash is null.
+ * Signs and submits this node's part of the delivery as a whitelisted oracle.
+ *
+ * - No oracle set on the contract: `confirm_delivery` (single oracle, as before).
+ * - M-of-N oracle set: `approve_delivery`. The funds are released by whichever oracle's approval
+ *   completes the quorum; the others get `released: false` until then.
+ *
+ * Idempotent and safe to run on several nodes at once: an already Delivered escrow sends no
+ * transaction, a node that already approved does not pay for a second approval, and losing the
+ * race to the final approval (the escrow turned Delivered meanwhile) counts as released.
  */
 export async function submitConfirmDeliveryOnChain(
   contractAddress: string,
   contractEscrowId: bigint
-): Promise<{ txHash: string | null }> {
-  const status = await getOnChainStatus(contractAddress, contractEscrowId)
-  if (status === 'Delivered') return { txHash: null }
-  if (status !== 'Shipped') {
-    throw new Error(`Escrow ${contractEscrowId} is "${status}" on chain; expected "Shipped"`)
-  }
-  const txHash = await invokeAsOracle(contractAddress, 'confirm_delivery', [
-    nativeToScVal(contractEscrowId, { type: 'u64' }),
+): Promise<DeliveryResult> {
+  const idArg = nativeToScVal(contractEscrowId, { type: 'u64' })
+  const me = oracleKeypair.publicKey()
+
+  const [status, setValue, approvalsValue] = await Promise.all([
+    getOnChainStatus(contractAddress, contractEscrowId),
+    readContract(contractAddress, 'get_oracle_set', []),
+    readContract(contractAddress, 'get_delivery_approvals', [idArg]),
   ])
-  return { txHash }
+
+  const step = decideDeliveryStep({
+    status,
+    oracleSet: parseOracleSet(setValue),
+    approvals: parseApprovals(approvalsValue),
+    me,
+  })
+
+  switch (step.kind) {
+    case 'already-delivered':
+      return { released: true, txHash: null }
+    case 'wrong-status':
+      throw new Error(`Escrow ${contractEscrowId} is "${step.status}" on chain; expected "Shipped"`)
+    case 'not-in-set':
+      throw new Error(`Oracle key ${me} is not in the contract's oracle set; check ORACLE_SECRET_KEY`)
+    case 'waiting':
+      console.log(
+        `[submit] escrow ${contractEscrowId}: waiting for quorum (${step.approvals}/${step.threshold} approvals)`
+      )
+      return { released: false, txHash: null }
+    case 'confirm-delivery':
+    case 'approve': {
+      try {
+        const txHash =
+          step.kind === 'confirm-delivery'
+            ? await invokeAsOracle(contractAddress, 'confirm_delivery', [idArg])
+            : await invokeAsOracle(contractAddress, 'approve_delivery', [
+                idArg,
+                nativeToScVal(me, { type: 'address' }),
+              ])
+        const after = await getOnChainStatus(contractAddress, contractEscrowId)
+        return { released: after === 'Delivered', txHash }
+      } catch (err) {
+        // Another oracle completed the quorum between our read and our transaction.
+        if ((await getOnChainStatus(contractAddress, contractEscrowId)) === 'Delivered') {
+          return { released: true, txHash: null }
+        }
+        throw err
+      }
+    }
+  }
 }
 
 /**
@@ -166,6 +231,11 @@ export async function confirmDelivery(
 
   if (!response.ok) {
     const text = await response.text()
+    // With several oracle nodes, another node may already have synced this delivery: the web app
+    // then answers 409 because the escrow is no longer SHIPPED. That is success for this node.
+    if (response.status === 409 && isAlreadyDeliveredResponse(text)) {
+      return { success: true, escrowId, txHash }
+    }
     throw new Error(`oracle/confirm returned ${response.status}: ${text}`)
   }
 

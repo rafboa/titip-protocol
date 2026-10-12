@@ -57,17 +57,19 @@ if (!USDC_ISSUER) {
 const deployerKeypair = Keypair.fromSecret(ORACLE_SECRET)
 const server = new rpc.Server(SOROBAN_RPC_URL)
 
-// WASM path
-const WASM_PATH = path.resolve(
-  import.meta.dirname ?? '.',
-  '..',
-  'packages',
-  'contracts',
-  'target',
-  'wasm32-unknown-unknown',
-  'release',
-  'titip_escrow.wasm'
+// WASM path. wasm32v1-none is the current Soroban target; wasm32-unknown-unknown is the legacy one
+// and is only used as a fallback.
+const CONTRACT_DIR = path.resolve(import.meta.dirname ?? '.', '..', 'packages', 'contracts')
+const WASM_CANDIDATES = ['wasm32v1-none', 'wasm32-unknown-unknown'].map((target) =>
+  path.join(CONTRACT_DIR, 'target', target, 'release', 'titip_escrow.wasm')
 )
+const WASM_PATH = WASM_CANDIDATES.find((p) => fs.existsSync(p)) ?? WASM_CANDIDATES[0]
+
+/** Newest modification time among the contract sources, to catch a stale build. */
+function newestSourceMtime(): number {
+  const srcDir = path.join(CONTRACT_DIR, 'src')
+  return Math.max(...fs.readdirSync(srcDir).map((f) => fs.statSync(path.join(srcDir, f)).mtimeMs))
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -157,7 +159,12 @@ async function main() {
 
   if (!fs.existsSync(WASM_PATH)) {
     console.error(`  ❌ WASM not found at: ${WASM_PATH}`)
-    console.error('  Run: cd packages/contracts && cargo build --target wasm32-unknown-unknown --release')
+    console.error('  Run: cd packages/contracts && cargo build --release --target wasm32v1-none')
+    process.exit(1)
+  }
+  if (fs.statSync(WASM_PATH).mtimeMs < newestSourceMtime()) {
+    console.error(`  ❌ ${WASM_PATH} is older than the contract sources: it would deploy outdated code.`)
+    console.error('  Run: cd packages/contracts && cargo build --release --target wasm32v1-none')
     process.exit(1)
   }
 
