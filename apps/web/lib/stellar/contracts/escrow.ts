@@ -218,6 +218,90 @@ export async function buildDisputeEscrowTx(
 }
 
 /**
+ * Build an unsigned `submit_evidence` transaction for the buyer or seller to sign. The contract
+ * stores the SHA-256 (BytesN<32>) and a short pointer; the file itself stays off-chain.
+ */
+export async function buildSubmitEvidenceTx(
+  partyAddress: string,
+  contractEscrowId: bigint,
+  sha256Hex: string,
+  uri: string
+): Promise<string> {
+  if (!/^[0-9a-f]{64}$/.test(sha256Hex)) throw new Error('Evidence hash must be 64 lowercase hex characters')
+  const contract = getContract()
+  const account = await server.getAccount(partyAddress)
+
+  const tx = new TransactionBuilder(account, {
+    fee: String(Number(BASE_FEE) * STELLAR_CONFIG.feeMultiplier),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        'submit_evidence',
+        nativeToScVal(contractEscrowId, { type: 'u64' }),
+        new Address(partyAddress).toScVal(),
+        xdr.ScVal.scvBytes(Buffer.from(sha256Hex, 'hex')),
+        nativeToScVal(uri, { type: 'string' })
+      )
+    )
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(
+      `Simulation failed: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`
+    )
+  }
+
+  const assembled = rpc.assembleTransaction(tx, simulated).build()
+  return assembled.toXDR()
+}
+
+export type OnChainEvidence = {
+  submitter: string
+  /** Lowercase hex SHA-256 */
+  hash: string
+  uri: string
+  ledger: number
+}
+
+/**
+ * All evidence committed on-chain for an escrow, oldest first (contract `get_evidence`).
+ */
+export async function getOnChainEvidence(contractEscrowId: bigint): Promise<OnChainEvidence[]> {
+  const contract = getContract()
+  const dummyAccount = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0')
+
+  const tx = new TransactionBuilder(dummyAccount, {
+    fee: String(BASE_FEE),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(contract.call('get_evidence', nativeToScVal(contractEscrowId, { type: 'u64' })))
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation error: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`)
+  }
+
+  const retval = (simulated as rpc.Api.SimulateTransactionSuccessResponse).result?.retval
+  if (!retval) return []
+
+  const native: unknown = scValToNative(retval)
+  if (!Array.isArray(native)) return []
+  return native.map((raw: { submitter: unknown; hash: unknown; uri: unknown; ledger: unknown }) => ({
+    submitter: String(raw.submitter),
+    hash: Buffer.from(raw.hash as Uint8Array).toString('hex'),
+    uri: String(raw.uri),
+    ledger: Number(raw.ledger),
+  }))
+}
+
+/**
  * Build, sign, and submit the `resolve_dispute` transaction using the admin's secret key.
  */
 export async function submitResolveDisputeTx(

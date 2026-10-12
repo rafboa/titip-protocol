@@ -35,7 +35,15 @@ export async function middleware(request: NextRequest) {
     limit = 15;
   }
 
-  const rateLimitKey = `${ip}:${pathname.split('/').slice(0, 4).join('/')}`;
+  let rateLimitKey = `${ip}:${pathname.split('/').slice(0, 4).join('/')}`;
+
+  // Evidence uploads (up to ~4 MB each) are buffered in memory and stored in Postgres: keep them scarce.
+  // Only the POST, and in its own bucket: the escrow page polls GETs under the same /api/escrow/:id key,
+  // and those must not eat the upload budget (or the other way around).
+  if (request.method === 'POST' && pathname.endsWith('/evidence')) {
+    limit = 20;
+    rateLimitKey = `${ip}:evidence-upload:${pathname.split('/')[3]}`;
+  }
   const { allowed, retryAfter } = await checkRateLimit(rateLimitKey, limit, windowMs);
 
   if (!allowed) {

@@ -17,6 +17,7 @@ import { TrackingForm } from '@/components/escrow/tracking-form';
 import { RefundButton } from '@/components/escrow/refund-button';
 import { DisputeButton } from '@/components/escrow/dispute-button';
 import { FundButton } from '@/components/escrow/fund-button';
+import { DisputeEvidence } from '@/components/escrow/dispute-evidence';
 
 type EscrowDetail = {
   id: string;
@@ -203,12 +204,15 @@ export default function EscrowDetailPage() {
           )}
 
           {escrow.status === 'DISPUTED' && (
-            <Card variant="glass" className="mb-8 border-destructive/20 bg-destructive/5 p-5 sm:p-8">
-              <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-destructive sm:text-xl">
-                <AlertCircle size={20} /> {t('dispute.disputedTitle')}
-              </h3>
-              <p className="leading-relaxed text-muted-foreground">{t('dispute.disputedNotice')}</p>
-            </Card>
+            <>
+              <Card variant="glass" className="mb-8 border-destructive/20 bg-destructive/5 p-5 sm:p-8">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-destructive sm:text-xl">
+                  <AlertCircle size={20} /> {t('dispute.disputedTitle')}
+                </h3>
+                <p className="leading-relaxed text-muted-foreground">{t('dispute.disputedNotice')}</p>
+              </Card>
+              <DisputeEvidence escrowId={escrow.id} />
+            </>
           )}
         </div>
       ) : null}
