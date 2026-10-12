@@ -44,6 +44,10 @@ export async function GET(
           take: 10,
           select: { id: true, eventType: true, confirmedAt: true },
         },
+        legs: {
+          orderBy: { seq: 'asc' },
+          select: { id: true, seq: true, courier: true, trackingNumber: true, status: true, stage: true },
+        },
       },
     })
 

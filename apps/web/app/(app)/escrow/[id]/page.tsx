@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { EscrowStatusBadge } from '@/components/escrow/escrow-status-badge';
 import { EscrowTimeline } from '@/components/escrow/escrow-timeline';
 import { TrackingForm } from '@/components/escrow/tracking-form';
+import { ShipmentLegs, type ShipmentLeg } from '@/components/escrow/shipment-legs';
 import { RefundButton } from '@/components/escrow/refund-button';
 import { DisputeButton } from '@/components/escrow/dispute-button';
 import { FundButton } from '@/components/escrow/fund-button';
@@ -32,6 +33,9 @@ type EscrowDetail = {
   deliveredAt: string | null;
   refundedAt: string | null;
   timeoutAt: string;
+  courierCode: string | null;
+  trackingNumber: string | null;
+  legs: ShipmentLeg[];
   txHashFund: string | null;
   txHashRelease: string | null;
   txHashFundUrl: string | null;
@@ -173,6 +177,16 @@ export default function EscrowDetailPage() {
           {escrow.resolutionBuyerBps !== null && (
             <DisputeResolutionSummary amountUsdc={escrow.amountUsdc} buyerBps={escrow.resolutionBuyerBps} />
           )}
+
+          <ShipmentLegs
+            escrowId={escrow.id}
+            escrowStatus={escrow.status}
+            isBuyer={isBuyer}
+            isSeller={isSeller}
+            primary={{ courierCode: escrow.courierCode, trackingNumber: escrow.trackingNumber }}
+            legs={escrow.legs ?? []}
+            onChanged={refetch}
+          />
 
           {escrow.status === 'PENDING' && isBuyer && (
             <div className="mb-8">
