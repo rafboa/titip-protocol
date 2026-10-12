@@ -25,6 +25,7 @@ import {
   evidenceUri,
 } from '@/lib/evidence/file'
 import { buildEvidenceList, slotsUsed } from '@/lib/evidence/merge'
+import { stripImageMetadata } from '@/lib/evidence/strip-metadata'
 import {
   deleteEvidenceObjects,
   evidenceStorageKey,
@@ -123,15 +124,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'File is too large' }, { status: 413 })
     }
 
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    const mimeType = detectEvidenceMime(bytes)
+    const uploaded = new Uint8Array(await file.arrayBuffer())
+    const mimeType = detectEvidenceMime(uploaded)
     if (!mimeType) {
       return NextResponse.json({ error: 'Only JPEG, PNG or WebP images are accepted' }, { status: 400 })
     }
-    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex')
-    if (clientHash.toLowerCase() !== sha256) {
+    const uploadedHash = crypto.createHash('sha256').update(uploaded).digest('hex')
+    if (clientHash.toLowerCase() !== uploadedHash) {
       return NextResponse.json({ error: 'The uploaded file does not match the hash sent with it' }, { status: 400 })
     }
+    // Browser uploads are already clean (same instance back); a direct API upload may carry EXIF/GPS.
+    // What is stored, hashed and committed on-chain is the cleaned file, and the response carries its hash.
+    const bytes = stripImageMetadata(uploaded, mimeType)
+    const sha256 = bytes === uploaded ? uploadedHash : crypto.createHash('sha256').update(bytes).digest('hex')
 
     // Idempotent on (escrow, submitter, hash): picking the same file again after a rejected signature
     // reuses the stored row and only builds a fresh transaction.
@@ -180,7 +185,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
         storage = { storageKey }
       } else {
-        storage = { blob: { create: { data: bytes } } }
+        storage = { blob: { create: { data: new Uint8Array(bytes) } } }
       }
 
       try {
