@@ -44,6 +44,7 @@ model Escrow {
   seller             User          @relation("SellerEscrows", fields: [sellerAddress], references: [stellarAddress])
   oracleEvents       OracleEvent[]
   legs               ShipmentLeg[]
+  evidence           EvidenceFile[]
   @@index([buyerAddress])
   @@index([sellerAddress])
   @@index([status])
@@ -145,4 +146,36 @@ enum CourierCode {
   SICEPAT
   ANTERAJA
   POS_INDONESIA
+}
+
+/// Dispute evidence uploaded by the buyer or seller. The chain is the source of truth for what was
+/// committed (contract `get_evidence`); this row only holds the file behind a committed hash.
+/// `committedAt` is set once the hash is visible on-chain. The bytes live in EvidenceBlob so that
+/// listing metadata never loads the files.
+model EvidenceFile {
+  id          String        @id @default(cuid())
+  escrowId    String        @map("escrow_id")
+  /// Stellar address of the party who uploaded (and signs the commit).
+  submitter   String
+  /// SHA-256 of the stored bytes, lowercase hex (the value committed on-chain).
+  sha256      String        @db.Char(64)
+  mimeType    String        @map("mime_type")
+  sizeBytes   Int           @map("size_bytes")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  committedAt DateTime?     @map("committed_at")
+  /// Hash of the submit_evidence transaction; null if the item was already on-chain when committed.
+  txHash      String?       @map("tx_hash")
+  escrow      Escrow        @relation(fields: [escrowId], references: [id])
+  blob        EvidenceBlob?
+  @@unique([escrowId, submitter, sha256])
+  @@index([escrowId])
+  @@map("evidence_files")
+}
+
+// v1.1: move the bytes to object storage (Supabase Storage / S3) and keep only a key here.
+model EvidenceBlob {
+  evidenceId String       @id @map("evidence_id")
+  data       Bytes
+  evidence   EvidenceFile @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  @@map("evidence_blobs")
 }

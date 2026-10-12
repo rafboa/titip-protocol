@@ -33,6 +33,9 @@ export async function middleware(request: NextRequest) {
     limit = 20;
   } else if (pathname === '/api/escrow/create') {
     limit = 15;
+  } else if (pathname.endsWith('/evidence')) {
+    // Uploads (up to ~4 MB each) are buffered in memory and stored in Postgres: keep them scarce.
+    limit = 20;
   }
 
   const rateLimitKey = `${ip}:${pathname.split('/').slice(0, 4).join('/')}`;
