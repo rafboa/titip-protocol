@@ -84,4 +84,18 @@ describe('GET /api/escrow/[id]', () => {
     const args = prismaMock.escrow.findUnique.mock.calls[0][0]
     expect(args.include.oracleEvents.select).toEqual({ id: true, eventType: true, confirmedAt: true })
   })
+
+  it('shows how a dispute was resolved but never who signed it (the admin address is the oracle key here)', async () => {
+    prismaMock.escrow.findUnique.mockResolvedValue({
+      ...row(),
+      status: 'DELIVERED',
+      resolutionBuyerBps: 7000,
+      resolvedAt: new Date('2026-10-13T01:00:00Z'),
+      resolvedBy: 'GADMINSECRETADDRESS',
+    })
+    const body = await (await call()).json()
+    expect(body).toMatchObject({ resolutionBuyerBps: 7000, resolvedAt: '2026-10-13T01:00:00.000Z' })
+    expect(body).not.toHaveProperty('resolvedBy')
+    expect(JSON.stringify(body)).not.toContain('GADMINSECRETADDRESS')
+  })
 })

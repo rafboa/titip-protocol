@@ -52,7 +52,8 @@ export async function GET(
     }
 
     // The raw QRIS payload (merchant account data) is only needed to create the escrow.
-    const { qrisPayloadRaw: _qrisPayloadRaw, ...visible } = escrow
+    // `resolvedBy` is the admin's address: on this deployment the same key as the oracle's, which is never shown.
+    const { qrisPayloadRaw: _qrisPayloadRaw, resolvedBy: _resolvedBy, ...visible } = escrow
 
     // Enrich with Stellar Expert links for any tx hashes
     const enriched = {

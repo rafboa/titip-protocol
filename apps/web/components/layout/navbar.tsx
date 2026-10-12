@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Wallet, LogOut, Package, Settings } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Wallet, LogOut, Package, Settings, Scale } from 'lucide-react';
 
 import { useAuthStore } from '@/lib/store/auth';
 import { useTranslation } from '@/lib/i18n/use-translation';
@@ -17,6 +18,19 @@ export function Navbar() {
   const { isAuthenticated, publicKey, logout } = useAuthStore();
   const { t } = useTranslation();
   const [isConnectOpen, setIsConnectOpen] = useState(false);
+
+  // Cosmetic only: whether to show the Admin link. Every /api/admin route checks the contract admin itself.
+  const { data: adminInfo } = useQuery<{ isAdmin: boolean }>({
+    queryKey: ['admin', 'me', publicKey],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/me');
+      if (!res.ok) return { isAdmin: false };
+      return res.json();
+    },
+    enabled: isAuthenticated,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
 
   return (
     <nav className="sticky top-0 z-40 flex items-center justify-between border-b border-border bg-[rgba(11,14,20,0.8)] px-6 py-4 backdrop-blur-md">
@@ -50,6 +64,14 @@ export function Navbar() {
             >
               <Settings size={18} /> <span className="hidden sm:inline">{t('nav.settings')}</span>
             </Link>
+            {adminInfo?.isAdmin && (
+              <Link
+                href="/admin/disputes"
+                className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Scale size={18} /> <span className="hidden sm:inline">{t('nav.admin')}</span>
+              </Link>
+            )}
           </>
         )}
       </div>

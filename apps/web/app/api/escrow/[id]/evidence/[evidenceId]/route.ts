@@ -13,6 +13,7 @@ import { prisma } from '@titip/db'
 import { getOnChainEvidence, submitSignedTx } from '@/lib/stellar/contracts/escrow'
 import {
   WRONG_CONTRACT_ERROR,
+  evidenceReadRole,
   isEscrowParty,
   isOnCurrentContract,
   resolveEvidenceReader,
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const { id, evidenceId } = await params
     const escrow = await prisma.escrow.findUnique({ where: { id } })
     if (!escrow) return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
-    if (caller.kind === 'party' && !isEscrowParty(escrow, caller.address)) {
+    if (!(await evidenceReadRole(caller, escrow))) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can view this evidence' }, { status: 403 })
     }
     if (!isOnCurrentContract(escrow)) {
