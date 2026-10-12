@@ -192,8 +192,9 @@ const webhookDeps: WebhookDeps = {
       await prisma.shipmentLeg.updateMany({ where: { id: legId, deliveredAt: null }, data: { deliveredAt: new Date() } })
     }
   },
-  markProcessed: async (id) => {
-    await prisma.webhookEvent.update({ where: { id }, data: { processedAt: new Date() } })
+  claimProcessed: async (id) => {
+    const claimed = await prisma.webhookEvent.updateMany({ where: { id, processedAt: null }, data: { processedAt: new Date() } })
+    return claimed.count === 1
   },
   logOracleEvent: (escrowId, eventType, payload) => logOracleEvent(escrowId, eventType, payload),
   notify: async (userAddress, type, message) => {

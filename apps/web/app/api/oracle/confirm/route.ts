@@ -30,6 +30,19 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB)
 }
 
+/**
+ * The node that actually sent the releasing transaction may reach this route after another node
+ * (one that only saw the escrow already Delivered, so it has no hash) has synced the DB. Keep the
+ * release hash for the audit trail; it is set once and never overwritten.
+ */
+async function recordReleaseHash(escrowId: string, txHash: string | undefined): Promise<void> {
+  if (!txHash) return
+  await prisma.escrow.updateMany({
+    where: { id: escrowId, status: 'DELIVERED', txHashRelease: null },
+    data: { txHashRelease: txHash },
+  })
+}
+
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
   const expectedToken = process.env.ORACLE_INTERNAL_API_KEY
@@ -63,6 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (escrow.status !== 'SHIPPED') {
+      if (escrow.status === 'DELIVERED') await recordReleaseHash(escrowId, txHash)
       return NextResponse.json(
         { error: `Cannot confirm delivery for escrow with status "${escrow.status}". Expected "SHIPPED".` },
         { status: 409 }
@@ -128,14 +142,7 @@ export async function POST(request: NextRequest) {
     })
 
     if (!synced) {
-      // The node that actually sent the releasing transaction may lose the race to a node that only
-      // saw the escrow already Delivered (no tx). Keep the release hash, set once, for the audit trail.
-      if (txHash) {
-        await prisma.escrow.updateMany({
-          where: { id: escrowId, status: 'DELIVERED', txHashRelease: null },
-          data: { txHashRelease: txHash },
-        })
-      }
+      await recordReleaseHash(escrowId, txHash)
       return NextResponse.json(
         { error: 'Cannot confirm delivery for escrow with status "DELIVERED". Expected "SHIPPED".' },
         { status: 409 }

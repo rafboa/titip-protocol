@@ -14,6 +14,8 @@
 //    processedAt is global (shared DB) but every node must get to approve, so the event stays
 //    unprocessed (re-handled each cycle, a no-op for nodes that already approved) until the
 //    delivery is released. Only transactions a node actually sends are logged for it.
+//  - Every node handles every event; claimProcessed picks the one node that writes the once-only
+//    side effects (webhook log, notifications).
 
 import { eventTypeForDeliveryStep, type DeliveryStep } from '../stellar/quorum.js'
 
@@ -53,7 +55,11 @@ export type WebhookDeps = {
   getEvent(id: string): Promise<WebhookEventRow | null>
   resolveShipment(courier: string, trackingNumber: string): Promise<ShipmentRef | null>
   recordLegStage(legId: string, stage: string): Promise<void>
-  markProcessed(id: string): Promise<void>
+  /**
+   * Atomically marks the event processed; true only for the one node whose call changed it. Every
+   * node runs every event, so once-only side effects (logging, notifications) belong to the winner.
+   */
+  claimProcessed(id: string): Promise<boolean>
   logOracleEvent(escrowId: string, eventType: string, payload: Record<string, unknown>): Promise<void>
   notify(userAddress: string, type: string, message: string): Promise<void>
   /**
@@ -102,10 +108,7 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
   if (event.processedAt) return 'skipped-processed'
 
   const ref = await deps.resolveShipment(event.courier, event.trackingNumber)
-  if (!ref) {
-    await deps.markProcessed(event.id)
-    return 'no-escrow'
-  }
+  if (!ref) return (await deps.claimProcessed(event.id)) ? 'no-escrow' : 'skipped-processed'
   const { escrow } = ref
 
   // A leg the buyer has not approved yet, or a final delivery waiting for the buyer's decision on a
@@ -116,58 +119,58 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
   if (proposedLeg || finalDeliveryWaiting) return 'deferred'
 
   const payload = asRecord(event.payload)
-  // A final delivery on a SHIPPED escrow is logged after the chain step (it may be re-handled many
-  // times while the quorum is pending); everything else is handled exactly once.
-  const releasing = event.stage === 'DELIVERED' && escrow.status === 'SHIPPED' && ref.isFinal
-  if (!releasing) await deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
+  const logWebhook = () => deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
 
+  // Every node handles every event (one queue per node) but only the node that claims it writes
+  // the once-only side effects: the webhook log and the user notifications.
   if (ref.kind === 'LEG' && ref.legStatus === 'REJECTED') {
-    await deps.markProcessed(event.id)
+    if (!(await deps.claimProcessed(event.id))) return 'skipped-processed'
+    await logWebhook()
     return 'leg-not-approved'
   }
   if (ref.legId) await deps.recordLegStage(ref.legId, event.stage)
 
-  let outcome: WebhookOutcome = 'logged'
+  // Final delivery of a SHIPPED escrow: every node must approve, so the event stays unprocessed
+  // while the quorum is pending and is only claimed once the funds are released.
+  if (event.stage === 'DELIVERED' && escrow.status === 'SHIPPED' && ref.isFinal) {
+    const { released, txHash, step } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
+    // A transaction this node sent is its own event, whether or not it wins the claim below.
+    const submitted = eventTypeForDeliveryStep(step, txHash)
+    if (submitted) await deps.logOracleEvent(escrow.id, submitted, { step, released, txHash })
+    if (!released) return 'awaiting-quorum'
 
+    // Also from a node that lost the race: the web app keeps the release tx hash from the node that sent it.
+    await deps.syncDelivery(escrow.id, payload, txHash)
+    if (!(await deps.claimProcessed(event.id))) return 'skipped-processed'
+    await logWebhook()
+    return 'delivered'
+  }
+
+  let outcome: WebhookOutcome = 'logged'
+  let openDispute = false
   if (event.stage === 'DELIVERED') {
-    if (escrow.status !== 'SHIPPED') {
-      outcome = 'ignored-terminal'
-    } else if (!ref.isFinal) {
-      outcome = 'leg-delivered'
-    } else {
-      const { released, txHash, step } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
-      const submitted = eventTypeForDeliveryStep(step, txHash)
-      if (released) {
-        await deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
-        if (submitted) await deps.logOracleEvent(escrow.id, submitted, { step, released, txHash })
-        await deps.syncDelivery(escrow.id, payload, txHash)
-        outcome = 'delivered'
-      } else {
-        if (submitted) await deps.logOracleEvent(escrow.id, submitted, { step, released, txHash, webhook: payload })
-        // This node did its part; the other oracles still have to approve and each of them must
-        // see this event, so leave it unprocessed instead of consuming it for everyone.
-        return 'awaiting-quorum'
-      }
-    }
+    outcome = escrow.status !== 'SHIPPED' ? 'ignored-terminal' : 'leg-delivered'
   } else if (event.stage === 'RETURN_TO_SENDER') {
     if (DISPUTABLE.has(escrow.status)) {
-      if (deps.openDispute) {
-        await deps.openDispute(escrow)
-        outcome = 'dispute-opened'
-      } else {
-        outcome = 'return-notified'
-      }
-      const message =
-        outcome === 'dispute-opened'
-          ? 'Paket dikembalikan ke pengirim oleh kurir. Dispute dibuka otomatis dan dana dibekukan di escrow sampai diselesaikan admin.'
-          : 'Paket dikembalikan ke pengirim oleh kurir. Dana tetap aman di escrow; ajukan dispute dari halaman escrow.'
-      await deps.notify(escrow.buyerAddress, 'ESCROW_RETURN_TO_SENDER', message)
-      await deps.notify(escrow.sellerAddress, 'ESCROW_RETURN_TO_SENDER', message)
+      openDispute = true
+      outcome = deps.openDispute ? 'dispute-opened' : 'return-notified'
     } else {
       outcome = 'ignored-terminal'
     }
   }
 
-  await deps.markProcessed(event.id)
+  // Idempotent on-chain (and a failure here must not consume the event), so every node may run it.
+  if (openDispute && deps.openDispute) await deps.openDispute(escrow)
+
+  if (!(await deps.claimProcessed(event.id))) return 'skipped-processed'
+  await logWebhook()
+  if (openDispute) {
+    const message =
+      outcome === 'dispute-opened'
+        ? 'Paket dikembalikan ke pengirim oleh kurir. Dispute dibuka otomatis dan dana dibekukan di escrow sampai diselesaikan admin.'
+        : 'Paket dikembalikan ke pengirim oleh kurir. Dana tetap aman di escrow; ajukan dispute dari halaman escrow.'
+    await deps.notify(escrow.buyerAddress, 'ESCROW_RETURN_TO_SENDER', message)
+    await deps.notify(escrow.sellerAddress, 'ESCROW_RETURN_TO_SENDER', message)
+  }
   return outcome
 }
