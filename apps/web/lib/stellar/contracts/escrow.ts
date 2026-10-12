@@ -302,6 +302,80 @@ export async function getOnChainEvidence(contractEscrowId: bigint): Promise<OnCh
 }
 
 /**
+ * The contract's admin address (`get_config().admin`): the only account that can resolve disputes.
+ * The chain is the source of truth, so no env var can disagree with it.
+ */
+export async function getContractAdmin(): Promise<string> {
+  const contract = getContract()
+  const dummyAccount = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0')
+
+  const tx = new TransactionBuilder(dummyAccount, {
+    fee: String(BASE_FEE),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(contract.call('get_config'))
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation error: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`)
+  }
+  const retval = (simulated as rpc.Api.SimulateTransactionSuccessResponse).result?.retval
+  if (!retval) throw new Error('Contract is not initialized')
+  const config: { admin?: unknown } = scValToNative(retval)
+  if (typeof config.admin !== 'string') throw new Error('Contract config has no admin')
+  return config.admin
+}
+
+/**
+ * Build an unsigned `resolve_dispute_split` transaction for the contract admin to sign.
+ * `buyerBps` is the buyer's share in basis points (10000 = full refund, 0 = seller gets everything);
+ * the buyer's share is rounded down and the seller receives the remainder.
+ */
+export async function buildResolveDisputeSplitTx(
+  adminAddress: string,
+  contractEscrowId: bigint,
+  buyerBps: number
+): Promise<string> {
+  const contract = getContract()
+  const account = await server.getAccount(adminAddress)
+
+  const tx = new TransactionBuilder(account, {
+    fee: String(Number(BASE_FEE) * STELLAR_CONFIG.feeMultiplier),
+    networkPassphrase: STELLAR_CONFIG.networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        'resolve_dispute_split',
+        nativeToScVal(contractEscrowId, { type: 'u64' }),
+        nativeToScVal(buyerBps, { type: 'u32' })
+      )
+    )
+    .setTimeout(30)
+    .build()
+
+  const simulated = await server.simulateTransaction(tx)
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(
+      `Simulation failed: ${(simulated as rpc.Api.SimulateTransactionErrorResponse).error}`
+    )
+  }
+
+  const assembled = rpc.assembleTransaction(tx, simulated).build()
+  return assembled.toXDR()
+}
+
+/**
+ * What the network says about a transaction hash: used to tell, on a retry, whether the admin's
+ * resolution already landed (so the database can catch up) or the dispute was resolved some other way.
+ */
+export async function getTransactionOutcome(txHash: string): Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND'> {
+  const result = await server.getTransaction(txHash)
+  return result.status
+}
+
+/**
  * Build, sign, and submit the `resolve_dispute` transaction using the admin's secret key.
  */
 export async function submitResolveDisputeTx(

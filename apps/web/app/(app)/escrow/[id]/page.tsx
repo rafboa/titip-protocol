@@ -19,6 +19,7 @@ import { RefundButton } from '@/components/escrow/refund-button';
 import { DisputeButton } from '@/components/escrow/dispute-button';
 import { FundButton } from '@/components/escrow/fund-button';
 import { DisputeEvidence } from '@/components/escrow/dispute-evidence';
+import { DisputeResolutionSummary } from '@/components/escrow/dispute-resolution-summary';
 
 type EscrowDetail = {
   id: string;
@@ -39,6 +40,9 @@ type EscrowDetail = {
   txHashRelease: string | null;
   txHashFundUrl: string | null;
   txHashReleaseUrl: string | null;
+  /** The buyer's share (basis points) when an admin resolved a dispute; null otherwise. */
+  resolutionBuyerBps: number | null;
+  resolvedAt: string | null;
 };
 
 export default function EscrowDetailPage() {
@@ -142,7 +146,11 @@ export default function EscrowDetailPage() {
                   <Separator />
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
-                      {escrow.status === 'REFUNDED' ? t('escrowDetail.refundTx') : t('escrowDetail.releaseTx')}
+                      {escrow.resolvedAt
+                        ? t('escrowDetail.resolutionTx')
+                        : escrow.status === 'REFUNDED'
+                          ? t('escrowDetail.refundTx')
+                          : t('escrowDetail.releaseTx')}
                     </span>
                     <a
                       href={escrow.txHashReleaseUrl}
@@ -165,6 +173,10 @@ export default function EscrowDetailPage() {
             deliveredAt={escrow.deliveredAt}
             refundedAt={escrow.refundedAt}
           />
+
+          {escrow.resolutionBuyerBps !== null && (
+            <DisputeResolutionSummary amountUsdc={escrow.amountUsdc} buyerBps={escrow.resolutionBuyerBps} />
+          )}
 
           <ShipmentLegs
             escrowId={escrow.id}

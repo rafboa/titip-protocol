@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@titip/db';
 import { submitResolveDisputeTx } from '@/lib/stellar/contracts/escrow';
+import { recordResolution, toAmountString } from '@/lib/admin/resolve';
 import { z } from 'zod';
 
 const ResolveSchema = z.object({
@@ -79,44 +80,26 @@ export async function POST(
       );
     }
 
+    // Same record as the admin screen: a winner is just a split of 100% / 0% to the buyer.
     const isBuyerWinner = winnerAddress === escrow.buyerAddress;
-    const newStatus = isBuyerWinner ? 'REFUNDED' : 'DELIVERED';
-
-    const [updated] = await prisma.$transaction([
-      prisma.escrow.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          refundedAt: isBuyerWinner ? new Date() : null,
-          deliveredAt: isBuyerWinner ? null : new Date(),
-          txHashRelease: txHash,
-        },
-      }),
-      // Notify buyer
-      prisma.notification.create({
-        data: {
-          userAddress: escrow.buyerAddress,
-          type: 'DISPUTE_RESOLVED',
-          message: isBuyerWinner 
-            ? `Dispute resolved in your favor. Funds refunded.` 
-            : `Dispute resolved in seller's favor. Funds released to seller.`,
-        },
-      }),
-      // Notify seller
-      prisma.notification.create({
-        data: {
-          userAddress: escrow.sellerAddress,
-          type: 'DISPUTE_RESOLVED',
-          message: isBuyerWinner 
-            ? `Dispute resolved in buyer's favor. Funds refunded to buyer.` 
-            : `Dispute resolved in your favor. Funds released to you.`,
-        },
-      })
-    ]);
+    const recorded = await recordResolution(
+      {
+        id: escrow.id,
+        buyerAddress: escrow.buyerAddress,
+        sellerAddress: escrow.sellerAddress,
+        amountUsdc: toAmountString(escrow.amountUsdc),
+      },
+      isBuyerWinner ? 10000 : 0,
+      txHash,
+      'internal'
+    );
+    if (!recorded) {
+      return NextResponse.json({ error: 'The dispute was resolved by someone else in the meantime' }, { status: 409 });
+    }
 
     return NextResponse.json({
-      id: updated.id,
-      status: updated.status,
+      id: escrow.id,
+      status: isBuyerWinner ? 'REFUNDED' : 'DELIVERED',
     });
   } catch (error: unknown) {
     console.error('[POST /api/escrow/:id/resolve] Error:', error);

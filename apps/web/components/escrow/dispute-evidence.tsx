@@ -29,7 +29,7 @@ type EvidenceList = {
  * committed on-chain with ONE Freighter signature (`submit_evidence`). The list always comes from the
  * contract, so a committed item stays visible even if the file behind it is gone.
  */
-export function DisputeEvidence({ escrowId }: { escrowId: string }) {
+export function DisputeEvidence({ escrowId, readOnly = false }: { escrowId: string; readOnly?: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +126,7 @@ export function DisputeEvidence({ escrowId }: { escrowId: string }) {
       <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold sm:text-xl">
         <FileImage size={20} className="text-primary" /> {t('evidence.title')}
       </h3>
-      <p className="mb-6 text-muted-foreground">{t('evidence.subtitle')}</p>
+      <p className="mb-6 text-muted-foreground">{t(readOnly ? 'evidence.readOnlySubtitle' : 'evidence.subtitle')}</p>
 
       {error && (
         <Alert variant="destructive" className="mb-6">

@@ -17,6 +17,7 @@ const prismaMock = vi.hoisted(() => ({
 const verifyJwt = vi.hoisted(() => vi.fn())
 const getAuthorizationHeader = vi.hoisted(() => vi.fn())
 const chainMock = vi.hoisted(() => ({
+  getContractAdmin: vi.fn(),
   buildSubmitEvidenceTx: vi.fn(),
   getOnChainEvidence: vi.fn(),
   submitSignedTx: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/lib/stellar/config', () => ({ STELLAR_CONFIG: { contractAddress: 'CCU
 import { GET as listEvidence, POST as uploadEvidence } from '@/app/api/escrow/[id]/evidence/route'
 import { GET as downloadEvidence, POST as commitEvidence } from '@/app/api/escrow/[id]/evidence/[evidenceId]/route'
 import { MAX_EVIDENCE_BYTES } from '@/lib/evidence/file'
+import { clearAdminCache } from '@/lib/admin/chain-admin'
 
 const BUYER = 'GBUYER'
 const SELLER = 'GSELLER'
@@ -90,6 +92,8 @@ const chainItem = (submitter: string, bytes = jpeg()) => ({ submitter, hash: sha
 
 beforeEach(() => {
   vi.resetAllMocks()
+  clearAdminCache()
+  chainMock.getContractAdmin.mockResolvedValue('GADMIN')
   process.env.ORACLE_INTERNAL_API_KEY = INTERNAL_KEY
   getAuthorizationHeader.mockReturnValue('Bearer t')
   verifyJwt.mockResolvedValue({ address: BUYER })
@@ -416,5 +420,44 @@ describe('escrows created on an older contract', () => {
   it('still answers an outsider with 403, not with the contract error', async () => {
     verifyJwt.mockResolvedValue({ address: OUTSIDER })
     expect((await listEvidence(getReq(''), listCtx)).status).toBe(403)
+  })
+})
+
+describe('the signed-in contract admin reads evidence as the arbiter', () => {
+  beforeEach(() => {
+    verifyJwt.mockResolvedValue({ address: 'GADMIN' })
+    prismaMock.evidenceFile.findMany.mockResolvedValue([])
+    chainMock.getOnChainEvidence.mockResolvedValue([chainItem(BUYER)])
+    const bytes = jpeg(16)
+    prismaMock.evidenceFile.findFirst.mockResolvedValue(
+      row({ sha256: sha(bytes), committedAt: new Date(), sizeBytes: bytes.length })
+    )
+    prismaMock.evidenceBlob.findUnique.mockResolvedValue({ evidenceId: 'ev1', data: bytes })
+  })
+
+  it('may list, with no upload rights and nothing marked as theirs', async () => {
+    const res = await listEvidence(getReq(''), listCtx)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ remaining: null, canUpload: false })
+  })
+
+  it('may download a committed file', async () => {
+    expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(200)
+  })
+
+  it('may not upload or commit (those stay for buyer and seller)', async () => {
+    expect((await uploadEvidence(uploadReq(jpeg()), listCtx)).status).toBe(403)
+    expect((await commitEvidence(commitReq({ signedXdr: 'S' }), itemCtx)).status).toBe(403)
+  })
+
+  it('is refused when the chain cannot prove who the admin is', async () => {
+    chainMock.getContractAdmin.mockRejectedValue(new Error('rpc down'))
+    expect((await listEvidence(getReq(''), listCtx)).status).toBe(403)
+  })
+
+  it('does not extend to anyone else', async () => {
+    verifyJwt.mockResolvedValue({ address: OUTSIDER })
+    expect((await listEvidence(getReq(''), listCtx)).status).toBe(403)
+    expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(403)
   })
 })

@@ -19,6 +19,7 @@ import {
   BASE_FEE,
   StrKey,
 } from '@stellar/stellar-sdk'
+import nodeCrypto from 'crypto'
 import { SignJWT, jwtVerify } from 'jose'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
 
@@ -46,27 +47,35 @@ function getNetworkPassphrase(): string {
 /**
  * Returns the SEP-10 server signing keypair from env.
  * Uses a dedicated SEP10_SERVER_SECRET_KEY so the oracle key never lives on the web server.
- * ORACLE_SECRET_KEY is accepted as a fallback outside production only (local dev convenience).
+ *
+ * Outside production, when it is unset, a dev-only key is derived from JWT_SECRET: stable across dev
+ * server reloads (a random key would change on recompile and invalidate open challenges). It must never be
+ * a key a user can log in with: if the server key were also an account (e.g. the oracle/admin key), the
+ * server's own signature on a challenge for that account would look like the client's signature too.
  */
 function getServerKeypair(): Keypair {
-  const secret =
-    process.env.SEP10_SERVER_SECRET_KEY ??
-    (process.env.NODE_ENV !== 'production' ? process.env.ORACLE_SECRET_KEY : undefined)
-  if (!secret) {
+  const secret = process.env.SEP10_SERVER_SECRET_KEY
+  if (secret) return Keypair.fromSecret(secret)
+  if (process.env.NODE_ENV === 'production') {
     throw new Error('SEP10_SERVER_SECRET_KEY environment variable is not set')
   }
-  return Keypair.fromSecret(secret)
+  const seed = nodeCrypto.createHash('sha256').update(`titip-sep10-dev-server:${getJwtSecretString()}`).digest()
+  return Keypair.fromRawEd25519Seed(seed)
+}
+
+function getJwtSecretString(): string {
+  const secret = process.env.JWT_SECRET
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not set')
+  }
+  return secret
 }
 
 /**
  * Returns the jose SecretKey for JWT signing/verification.
  */
 function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set')
-  }
-  return new TextEncoder().encode(secret)
+  return new TextEncoder().encode(getJwtSecretString())
 }
 
 type BuildChallengeResult = {
@@ -94,6 +103,9 @@ export async function buildChallenge(clientPublicKey: string): Promise<BuildChal
 
   const serverKeypair = getServerKeypair()
   const networkPassphrase = getNetworkPassphrase()
+  if (clientPublicKey === serverKeypair.publicKey()) {
+    throw new Error('Invalid Stellar public key: the server signing key cannot log in')
+  }
 
   // Use a dummy sequence number — SEP-10 challenge transactions do NOT need
   // a real account sequence; the client only signs, never submits to the ledger.
@@ -195,6 +207,12 @@ export async function verifyChallenge(signedXdr: string): Promise<VerifyResult> 
   const clientPublicKey = firstOp.source
   if (!clientPublicKey || !StrKey.isValidEd25519PublicKey(clientPublicKey)) {
     throw new Error('Challenge transaction missing valid client public key on first operation')
+  }
+
+  // The client account must differ from the server signing key (SEP-10): otherwise the server's own
+  // signature would also count as the client's.
+  if (clientPublicKey === serverKeypair.publicKey()) {
+    throw new Error('Invalid challenge: the client account is the server signing key')
   }
 
   // 4. Verify both signatures exist

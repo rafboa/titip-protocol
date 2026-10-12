@@ -11,6 +11,7 @@ import { prisma } from '@titip/db'
 import { buildSubmitEvidenceTx, getOnChainEvidence } from '@/lib/stellar/contracts/escrow'
 import {
   WRONG_CONTRACT_ERROR,
+  evidenceReadRole,
   isEscrowParty,
   isOnCurrentContract,
   resolveEvidenceReader,
@@ -36,7 +37,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params
     const escrow = await prisma.escrow.findUnique({ where: { id } })
     if (!escrow) return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
-    if (caller.kind === 'party' && !isEscrowParty(escrow, caller.address)) {
+    const role = await evidenceReadRole(caller, escrow)
+    if (!role) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can view this evidence' }, { status: 403 })
     }
     if (!isOnCurrentContract(escrow)) {
@@ -57,12 +59,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       select: { id: true, submitter: true, sha256: true, mimeType: true, sizeBytes: true },
     })
 
-    const viewer = caller.kind === 'party' ? caller.address : null
+    const viewer = role === 'party' && caller.kind === 'party' ? caller.address : null
     return NextResponse.json({
       items: buildEvidenceList(chain, stored, escrow, viewer),
       limit: MAX_EVIDENCE_PER_PARTY,
       remaining: viewer ? Math.max(0, MAX_EVIDENCE_PER_PARTY - slotsUsed(chain, viewer)) : null,
-      canUpload: caller.kind === 'party' && escrow.status === 'DISPUTED',
+      canUpload: role === 'party' && escrow.status === 'DISPUTED',
     })
   } catch (error: unknown) {
     console.error('[GET /api/escrow/:id/evidence] Error:', error)

@@ -40,6 +40,12 @@ model Escrow {
   refundedAt         DateTime?     @map("refunded_at")
   txHashFund         String?       @map("tx_hash_fund")
   txHashRelease      String?       @map("tx_hash_release")
+  /// Set when an admin resolved a dispute: the buyer's share in basis points (10000 = full refund,
+  /// 0 = seller gets everything). Null for escrows that were never disputed.
+  resolutionBuyerBps Int?          @map("resolution_buyer_bps")
+  resolvedAt         DateTime?     @map("resolved_at")
+  /// Stellar address of the admin who signed the resolution.
+  resolvedBy         String?       @map("resolved_by")
   buyer              User          @relation("BuyerEscrows",  fields: [buyerAddress],  references: [stellarAddress])
   seller             User          @relation("SellerEscrows", fields: [sellerAddress], references: [stellarAddress])
   oracleEvents       OracleEvent[]
