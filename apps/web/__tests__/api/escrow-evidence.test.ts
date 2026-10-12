@@ -4,7 +4,14 @@ import { NextRequest } from 'next/server'
 
 const prismaMock = vi.hoisted(() => ({
   escrow: { findUnique: vi.fn() },
-  evidenceFile: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn() },
+  evidenceFile: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    deleteMany: vi.fn(),
+  },
   evidenceBlob: { findUnique: vi.fn() },
 }))
 const verifyJwt = vi.hoisted(() => vi.fn())
@@ -18,6 +25,7 @@ const chainMock = vi.hoisted(() => ({
 vi.mock('@titip/db', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/auth/sep10', () => ({ verifyJwt, getAuthorizationHeader }))
 vi.mock('@/lib/stellar/contracts/escrow', () => chainMock)
+vi.mock('@/lib/stellar/config', () => ({ STELLAR_CONFIG: { contractAddress: 'CCURRENT' } }))
 
 import { GET as listEvidence, POST as uploadEvidence } from '@/app/api/escrow/[id]/evidence/route'
 import { GET as downloadEvidence, POST as commitEvidence } from '@/app/api/escrow/[id]/evidence/[evidenceId]/route'
@@ -40,6 +48,7 @@ const escrow = (overrides: Record<string, unknown> = {}) => ({
   id: 'esc1',
   status: 'DISPUTED',
   contractEscrowId: 7n,
+  contractAddress: 'CCURRENT',
   buyerAddress: BUYER,
   sellerAddress: SELLER,
   ...overrides,
@@ -86,7 +95,7 @@ beforeEach(() => {
   verifyJwt.mockResolvedValue({ address: BUYER })
   prismaMock.escrow.findUnique.mockResolvedValue(escrow())
   prismaMock.evidenceFile.findUnique.mockResolvedValue(null)
-  prismaMock.evidenceFile.count.mockResolvedValue(0)
+  prismaMock.evidenceFile.findMany.mockResolvedValue([])
   prismaMock.evidenceFile.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
     ...row(),
     ...data,
@@ -175,10 +184,40 @@ describe('POST /api/escrow/[id]/evidence (upload)', () => {
     expect((await uploadEvidence(uploadReq(jpeg(), null), listCtx)).status).toBe(400)
   })
 
-  it('returns 409 once the party has used all their slots', async () => {
-    prismaMock.evidenceFile.count.mockResolvedValue(10)
+  it('returns 409 once the party has used all their on-chain slots', async () => {
+    chainMock.getOnChainEvidence.mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => chainItem(BUYER, jpeg(i + 1)))
+    )
     expect((await uploadEvidence(uploadReq(jpeg()), listCtx)).status).toBe(409)
     expect(prismaMock.evidenceFile.create).not.toHaveBeenCalled()
+  })
+
+  it('is never locked out by abandoned uploads: 10 unsigned rows and 0 on-chain still accepts a new file', async () => {
+    const pending = Array.from({ length: 10 }, (_, i) => ({ id: `old${i}`, sha256: sha(jpeg(i + 100)) }))
+    prismaMock.evidenceFile.findMany.mockResolvedValue(pending)
+    const res = await uploadEvidence(uploadReq(jpeg()), listCtx)
+    expect(res.status).toBe(200)
+    // keeps at most 3 pending in total: 8 oldest removed, 2 stay, plus the new one
+    expect(prismaMock.evidenceFile.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: pending.slice(0, 8).map((p) => p.id) } },
+    })
+  })
+
+  it('does not prune a pending file the chain already holds (its commit was recorded late)', async () => {
+    const heldHash = sha(jpeg(100))
+    const pending = [{ id: 'held', sha256: heldHash }, ...[1, 2, 3].map((i) => ({ id: `old${i}`, sha256: sha(jpeg(i + 100)) }))]
+    prismaMock.evidenceFile.findMany.mockResolvedValue(pending)
+    chainMock.getOnChainEvidence.mockResolvedValue([{ submitter: BUYER, hash: heldHash, uri: 'titip:evidence/held', ledger: 1 }])
+    await uploadEvidence(uploadReq(jpeg()), listCtx)
+    const deleted = prismaMock.evidenceFile.deleteMany.mock.calls[0][0].where.id.in as string[]
+    expect(deleted).not.toContain('held')
+    expect(deleted).toEqual(['old1']) // 3 abandoned + the new one would exceed 3, so only the oldest goes
+  })
+
+  it('prunes nothing while the party is under the pending limit', async () => {
+    prismaMock.evidenceFile.findMany.mockResolvedValue([{ id: 'old1', sha256: sha(jpeg(101)) }])
+    await uploadEvidence(uploadReq(jpeg()), listCtx)
+    expect(prismaMock.evidenceFile.deleteMany).not.toHaveBeenCalled()
   })
 
   it('returns 502 when the transaction cannot be built', async () => {
@@ -354,5 +393,28 @@ describe('GET /api/escrow/[id]/evidence/[evidenceId] (download)', () => {
     verifyJwt.mockResolvedValue({ address: BUYER })
     prismaMock.evidenceFile.findFirst.mockResolvedValue(null)
     expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(404)
+  })
+})
+
+describe('escrows created on an older contract', () => {
+  // Escrow ids restart at 1 on every deployment: evidence for such a row would belong to another escrow.
+  beforeEach(() => {
+    prismaMock.escrow.findUnique.mockResolvedValue(escrow({ contractAddress: 'COLD' }))
+    prismaMock.evidenceFile.findFirst.mockResolvedValue(row({ committedAt: new Date() }))
+  })
+
+  it('is refused with 409 by every evidence endpoint, before any chain access', async () => {
+    expect((await listEvidence(getReq(''), listCtx)).status).toBe(409)
+    expect((await uploadEvidence(uploadReq(jpeg()), listCtx)).status).toBe(409)
+    expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(409)
+    expect((await commitEvidence(commitReq({ signedXdr: 'S' }), itemCtx)).status).toBe(409)
+    expect(chainMock.getOnChainEvidence).not.toHaveBeenCalled()
+    expect(chainMock.buildSubmitEvidenceTx).not.toHaveBeenCalled()
+    expect(chainMock.submitSignedTx).not.toHaveBeenCalled()
+  })
+
+  it('still answers an outsider with 403, not with the contract error', async () => {
+    verifyJwt.mockResolvedValue({ address: OUTSIDER })
+    expect((await listEvidence(getReq(''), listCtx)).status).toBe(403)
   })
 })

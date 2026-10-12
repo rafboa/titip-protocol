@@ -6,6 +6,7 @@
 
 import crypto from 'crypto'
 import { getAuthorizationHeader, verifyJwt } from '@/lib/auth/sep10'
+import { STELLAR_CONFIG } from '@/lib/stellar/config'
 
 export type EvidenceCaller = { kind: 'party'; address: string } | { kind: 'arbiter' }
 
@@ -40,3 +41,14 @@ export async function resolveEvidenceReader(request: Request): Promise<EvidenceC
 export function isEscrowParty(escrow: { buyerAddress: string; sellerAddress: string }, address: string): boolean {
   return address === escrow.buyerAddress || address === escrow.sellerAddress
 }
+
+/**
+ * Evidence is read from and written to the contract in NEXT_PUBLIC_CONTRACT_ADDRESS, and escrow ids
+ * restart at 1 on every deployment. An escrow row created on an older contract would otherwise show
+ * (or receive) the evidence of an unrelated escrow that has the same numeric id.
+ */
+export function isOnCurrentContract(escrow: { contractAddress: string }): boolean {
+  return escrow.contractAddress === STELLAR_CONFIG.contractAddress
+}
+
+export const WRONG_CONTRACT_ERROR = 'Evidence is only available for escrows on the current contract'

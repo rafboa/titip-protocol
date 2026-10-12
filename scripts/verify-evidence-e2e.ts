@@ -173,6 +173,26 @@ async function main(): Promise<void> {
   const tooBig = await fetch(api, { method: 'POST', headers: buyerHeaders, body: uploadBody(Buffer.concat([PNG_1X1, Buffer.alloc(4 * 1024 * 1024)])) })
   check('over 4 MB -> 413', tooBig.status === 413, String(tooBig.status))
 
+  console.log('[older contract]')
+  // Escrow ids restart at 1 on every deployment, so a row from an older contract must not read or
+  // write the evidence of whichever escrow has the same numeric id on the current one.
+  const stale = await prisma.escrow.create({
+    data: {
+      contractEscrowId,
+      contractAddress: 'CDOLDCONTRACTADDRESSNOTTHECURRENTONE',
+      buyerAddress: buyer.publicKey(),
+      sellerAddress: seller.publicKey(),
+      amountUsdc: '10',
+      status: 'DISPUTED',
+      timeoutAt: new Date(Date.now() + 3 * 3600 * 1000),
+    },
+  })
+  const staleApi = `${BASE}/api/escrow/${stale.id}/evidence`
+  const staleList = await fetch(staleApi, { headers: buyerHeaders })
+  check('list for a row on an older contract -> 409', staleList.status === 409, String(staleList.status))
+  const staleUpload = await fetch(staleApi, { method: 'POST', headers: buyerHeaders, body: uploadBody(newPng()) })
+  check('upload for a row on an older contract -> 409', staleUpload.status === 409, String(staleUpload.status))
+
   console.log(failures === 0 ? `\nPASS (escrow row ${escrow.id}, open /escrow/${escrow.id} to look at it)` : `\nFAIL: ${failures} check(s) failed`)
   process.exitCode = failures === 0 ? 0 : 1
 }

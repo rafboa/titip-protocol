@@ -11,7 +11,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@titip/db'
 import { getOnChainEvidence, submitSignedTx } from '@/lib/stellar/contracts/escrow'
-import { isEscrowParty, resolveEvidenceReader, resolveParty } from '@/lib/evidence/access'
+import {
+  WRONG_CONTRACT_ERROR,
+  isEscrowParty,
+  isOnCurrentContract,
+  resolveEvidenceReader,
+  resolveParty,
+} from '@/lib/evidence/access'
 import { MAX_EVIDENCE_PER_PARTY } from '@/lib/evidence/file'
 import { slotsUsed } from '@/lib/evidence/merge'
 
@@ -31,6 +37,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     if (!escrow) return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
     if (caller.kind === 'party' && !isEscrowParty(escrow, caller.address)) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can view this evidence' }, { status: 403 })
+    }
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: WRONG_CONTRACT_ERROR }, { status: 409 })
     }
 
     const row = await prisma.evidenceFile.findFirst({ where: { id: evidenceId, escrowId: id } })
@@ -94,6 +103,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     if (!escrow) return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
     if (!isEscrowParty(escrow, caller.address)) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can submit evidence' }, { status: 403 })
+    }
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: WRONG_CONTRACT_ERROR }, { status: 409 })
     }
 
     const row = await prisma.evidenceFile.findFirst({ where: { id: evidenceId, escrowId: id } })

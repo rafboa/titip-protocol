@@ -10,6 +10,12 @@ export const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
 /** Mirrors the contract's per-party limit (MAX_EVIDENCE_PER_PARTY in lib.rs). */
 export const MAX_EVIDENCE_PER_PARTY = 10
 
+/**
+ * Uploads a party may leave unsigned at once. Abandoned ones (a rejected signature, a closed tab) are
+ * pruned oldest first when a new upload would exceed this, so they can never use up the real limit.
+ */
+export const MAX_PENDING_UPLOADS_PER_PARTY = 3
+
 /** The contract rejects pointers longer than this (MAX_EVIDENCE_URI_LEN in lib.rs). */
 export const MAX_EVIDENCE_URI_BYTES = 128
 

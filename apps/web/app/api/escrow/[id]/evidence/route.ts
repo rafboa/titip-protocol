@@ -9,10 +9,17 @@ import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@titip/db'
 import { buildSubmitEvidenceTx, getOnChainEvidence } from '@/lib/stellar/contracts/escrow'
-import { isEscrowParty, resolveEvidenceReader, resolveParty } from '@/lib/evidence/access'
+import {
+  WRONG_CONTRACT_ERROR,
+  isEscrowParty,
+  isOnCurrentContract,
+  resolveEvidenceReader,
+  resolveParty,
+} from '@/lib/evidence/access'
 import {
   MAX_EVIDENCE_BYTES,
   MAX_EVIDENCE_PER_PARTY,
+  MAX_PENDING_UPLOADS_PER_PARTY,
   detectEvidenceMime,
   evidenceUri,
 } from '@/lib/evidence/file'
@@ -31,6 +38,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!escrow) return NextResponse.json({ error: 'Escrow not found' }, { status: 404 })
     if (caller.kind === 'party' && !isEscrowParty(escrow, caller.address)) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can view this evidence' }, { status: 403 })
+    }
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: WRONG_CONTRACT_ERROR }, { status: 409 })
     }
 
     let chain
@@ -75,6 +85,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!isEscrowParty(escrow, caller.address)) {
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can submit evidence' }, { status: 403 })
     }
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: WRONG_CONTRACT_ERROR }, { status: 409 })
+    }
     if (escrow.status !== 'DISPUTED') {
       return NextResponse.json(
         { error: `Cannot add evidence to an escrow with status "${escrow.status}". Expected "DISPUTED".` },
@@ -117,10 +130,33 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const key = { escrowId: id, submitter: caller.address, sha256 }
     let row = await prisma.evidenceFile.findUnique({ where: { escrowId_submitter_sha256: key } })
     if (!row) {
-      const used = await prisma.evidenceFile.count({ where: { escrowId: id, submitter: caller.address } })
-      if (used >= MAX_EVIDENCE_PER_PARTY) {
+      // The limit is the contract's own: on-chain slots are what a party really has.
+      let chain
+      try {
+        chain = await getOnChainEvidence(escrow.contractEscrowId)
+      } catch (err: unknown) {
+        console.error('[POST /api/escrow/:id/evidence] chain read failed:', err)
+        return NextResponse.json({ error: 'Failed to read evidence from the contract' }, { status: 502 })
+      }
+      if (slotsUsed(chain, caller.address) >= MAX_EVIDENCE_PER_PARTY) {
         return NextResponse.json({ error: 'Evidence limit reached for this escrow' }, { status: 409 })
       }
+
+      // Bound the storage of unsigned uploads without ever locking the party out: drop the oldest
+      // abandoned ones. A file the chain already holds (its commit was recorded late) is kept.
+      const pending = await prisma.evidenceFile.findMany({
+        where: { escrowId: id, submitter: caller.address, committedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, sha256: true },
+      })
+      const abandoned = pending.filter(
+        (p) => !chain.some((c) => c.submitter === caller.address && c.hash === p.sha256)
+      )
+      const excess = abandoned.length - (MAX_PENDING_UPLOADS_PER_PARTY - 1)
+      if (excess > 0) {
+        await prisma.evidenceFile.deleteMany({ where: { id: { in: abandoned.slice(0, excess).map((p) => p.id) } } })
+      }
+
       try {
         row = await prisma.evidenceFile.create({
           data: { ...key, mimeType, sizeBytes: bytes.length, blob: { create: { data: bytes } } },
