@@ -53,6 +53,17 @@ export function decideDeliveryStep(ctx: DeliveryContext): DeliveryStep {
 }
 
 /**
+ * Event type to record in `oracle_events` for a finished delivery step, or null when nothing
+ * happened on-chain. Only a transaction this node actually sent is an event: a node that is just
+ * waiting for the others (or finds the escrow already Delivered) is polled every cycle and would
+ * otherwise write the same row each time.
+ */
+export function eventTypeForDeliveryStep(step: DeliveryStep['kind'], txHash: string | null): 'DELIVERY_SUBMITTED' | null {
+  if (txHash && (step === 'approve' || step === 'confirm-delivery')) return 'DELIVERY_SUBMITTED'
+  return null
+}
+
+/**
  * True when the web app's /api/oracle/confirm 409 body says the escrow is already DELIVERED, i.e.
  * another oracle node already synced this delivery.
  */

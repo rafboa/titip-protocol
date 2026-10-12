@@ -92,4 +92,25 @@ describe('POST /api/oracle/confirm', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: 'DELIVERED', txHashRelease: TX_HASH }) })
     )
   })
+
+  it('records the oracle node that synced the delivery, falling back to "unknown"', async () => {
+    prismaMock.escrow.findUnique.mockResolvedValue(shippedEscrow)
+    getOnChainEscrow.mockResolvedValue({ status: 'Delivered' })
+    const { POST } = await import('@/app/api/oracle/confirm/route')
+
+    expect((await POST(req({ escrowId: 'esc1', nodeId: 'oracle-2' }))).status).toBe(200)
+    expect(prismaMock.oracleEvent.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ oracleNodeId: 'oracle-2' }) })
+    )
+
+    expect((await POST(req({ escrowId: 'esc1' }))).status).toBe(200)
+    expect(prismaMock.oracleEvent.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ oracleNodeId: 'unknown' }) })
+    )
+  })
+
+  it('rejects a malformed nodeId', async () => {
+    const { POST } = await import('@/app/api/oracle/confirm/route')
+    expect((await POST(req({ escrowId: 'esc1', nodeId: 'bad id; drop' }))).status).toBe(400)
+  })
 })

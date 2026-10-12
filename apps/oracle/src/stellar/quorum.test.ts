@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   decideDeliveryStep,
+  eventTypeForDeliveryStep,
   isAlreadyDeliveredResponse,
   parseApprovals,
   parseOracleSet,
@@ -107,5 +108,16 @@ describe('parsers', () => {
     expect(parseApprovals([ME, A])).toEqual([ME, A])
     expect(parseApprovals(null)).toEqual([])
     expect(parseApprovals([ME, 3, null])).toEqual([ME])
+  })
+
+  it('eventTypeForDeliveryStep records only a transaction this node sent', () => {
+    const tx = 'a'.repeat(64)
+    expect(eventTypeForDeliveryStep('approve', tx)).toBe('DELIVERY_SUBMITTED')
+    expect(eventTypeForDeliveryStep('confirm-delivery', tx)).toBe('DELIVERY_SUBMITTED')
+    // Re-polled every cycle without sending anything: no new row.
+    expect(eventTypeForDeliveryStep('waiting', null)).toBeNull()
+    expect(eventTypeForDeliveryStep('already-delivered', null)).toBeNull()
+    // Lost the race to the final approval: our tx failed, the other node's release counts.
+    expect(eventTypeForDeliveryStep('approve', null)).toBeNull()
   })
 })
