@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   currentContractWhere,
+  NO_UPDATE_LOG_INTERVAL_MS,
   nextWebhookCursor,
   shippedEscrowsWhere,
+  shouldLogNoUpdate,
   webhookBatchQuery,
   type WebhookCursor,
 } from './poll-queries.js'
@@ -54,5 +56,21 @@ describe('webhook event batches', () => {
       cursor = nextWebhookCursor(batch, 2)
     }
     expect(seen.has('new')).toBe(true)
+  })
+})
+
+describe('shouldLogNoUpdate', () => {
+  const now = new Date('2026-10-13T10:00:00Z')
+
+  it('logs when nothing was logged before', () => {
+    expect(shouldLogNoUpdate(null, now)).toBe(true)
+  })
+
+  it('skips inside the window', () => {
+    expect(shouldLogNoUpdate(new Date(now.getTime() - 60_000), now)).toBe(false)
+  })
+
+  it('logs again once the window has passed', () => {
+    expect(shouldLogNoUpdate(new Date(now.getTime() - NO_UPDATE_LOG_INTERVAL_MS), now)).toBe(true)
   })
 })

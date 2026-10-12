@@ -49,3 +49,15 @@ export function nextWebhookCursor(batch: { id: string; receivedAt: Date }[], tak
   const last = batch[batch.length - 1]
   return { receivedAt: last.receivedAt, id: last.id }
 }
+
+/** An unchanged "not delivered yet" poll is logged at most once per this window per escrow and node. */
+export const NO_UPDATE_LOG_INTERVAL_MS = 30 * 60_000
+
+/** True when no POLL_NO_UPDATE was logged for this escrow/node inside the window. */
+export function shouldLogNoUpdate(
+  lastLoggedAt: Date | null,
+  now: Date,
+  intervalMs: number = NO_UPDATE_LOG_INTERVAL_MS
+): boolean {
+  return lastLoggedAt === null || now.getTime() - lastLoggedAt.getTime() >= intervalMs
+}

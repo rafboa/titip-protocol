@@ -16,7 +16,7 @@ import { resolveAdapter } from '../couriers/registry.js'
 import { confirmDelivery, submitConfirmDeliveryOnChain, submitDisputeOnChain } from '../stellar/submit.js'
 import { eventTypeForDeliveryStep } from '../stellar/quorum.js'
 import { config } from '../config.js'
-import { currentContractWhere } from '../queues/poll-queries.js'
+import { currentContractWhere, shouldLogNoUpdate } from '../queues/poll-queries.js'
 import type { CourierAdapter } from '../couriers/types.js'
 import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
 
@@ -58,7 +58,15 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
   }
 
   if (!trackingResult.delivered) {
-    await logOracleEvent(escrowId, 'POLL_NO_UPDATE', trackingResult.raw)
+    // The poller re-enqueues every cycle; throttle so oracle_events does not grow without bound.
+    const lastNoUpdate = await prisma.oracleEvent.findFirst({
+      where: { escrowId, oracleNodeId: config.ORACLE_NODE_ID, eventType: 'POLL_NO_UPDATE' },
+      orderBy: { confirmedAt: 'desc' },
+      select: { confirmedAt: true },
+    })
+    if (shouldLogNoUpdate(lastNoUpdate?.confirmedAt ?? null, new Date())) {
+      await logOracleEvent(escrowId, 'POLL_NO_UPDATE', trackingResult.raw)
+    }
     console.log(
       `[worker] Job ${job.id} — not delivered yet. Status: "${trackingResult.statusText}"`
     )
