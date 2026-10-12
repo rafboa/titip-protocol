@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web-oracle:
+    name: Web + Oracle (typecheck, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Prisma generate only needs a syntactically valid URL; tests mock the DB.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+        working-directory: packages/db
+
+      - name: Typecheck web
+        run: npx tsc --noEmit
+        working-directory: apps/web
+
+      - name: Typecheck oracle
+        run: npm run lint
+        working-directory: apps/oracle
+
+      - name: Test web
+        run: npm test
+        working-directory: apps/web
+
+      - name: Test oracle
+        run: npm test
+        working-directory: apps/oracle
+
+  contracts:
+    name: Soroban contract (build, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/contracts
+
+      - name: Test
+        run: cargo test
+        working-directory: packages/contracts
+
+      - name: Build WASM
+        run: cargo build --target wasm32v1-none --release
+        working-directory: packages/contracts
