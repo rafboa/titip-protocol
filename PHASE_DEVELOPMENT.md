@@ -89,7 +89,7 @@ Transition the oracle from simulated polling to production enterprise integratio
 ## 📌 Phase 3: Multi-Sig Oracle & Decentralized Dispute DAO
 
 ### 1. Objective
-Eliminate single-point-of-failure oracle trust by deploying the multi-sig oracle blueprint (`packages/contracts/src/oracle.rs`) and decentralized arbitration.
+Eliminate single-point-of-failure oracle trust through the M-of-N oracle in `packages/contracts/src/lib.rs` (already live) plus staking and decentralized arbitration (not built yet).
 
 ### 2. Architecture & Components
 - **Staked Oracles:** Node operators stake 5,000 XLM / 500 USDC to join the validation network.
