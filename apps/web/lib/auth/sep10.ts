@@ -19,6 +19,7 @@ import {
   BASE_FEE,
   StrKey,
 } from '@stellar/stellar-sdk'
+import nodeCrypto from 'crypto'
 import { SignJWT, jwtVerify } from 'jose'
 import { STELLAR_CONFIG } from '@/lib/stellar/config'
 
@@ -47,34 +48,34 @@ function getNetworkPassphrase(): string {
  * Returns the SEP-10 server signing keypair from env.
  * Uses a dedicated SEP10_SERVER_SECRET_KEY so the oracle key never lives on the web server.
  *
- * Outside production, when it is unset, a random key is generated for this process. It must never be a
- * key a user can log in with: if the server key were also an account (e.g. the oracle/admin key), the
+ * Outside production, when it is unset, a dev-only key is derived from JWT_SECRET: stable across dev
+ * server reloads (a random key would change on recompile and invalidate open challenges). It must never be
+ * a key a user can log in with: if the server key were also an account (e.g. the oracle/admin key), the
  * server's own signature on a challenge for that account would look like the client's signature too.
  */
-let devServerKeypair: Keypair | null = null
-
 function getServerKeypair(): Keypair {
   const secret = process.env.SEP10_SERVER_SECRET_KEY
   if (secret) return Keypair.fromSecret(secret)
   if (process.env.NODE_ENV === 'production') {
     throw new Error('SEP10_SERVER_SECRET_KEY environment variable is not set')
   }
-  if (!devServerKeypair) {
-    devServerKeypair = Keypair.random()
-    console.warn('[sep10] SEP10_SERVER_SECRET_KEY is not set: using a random key for this dev process')
+  const seed = nodeCrypto.createHash('sha256').update(`titip-sep10-dev-server:${getJwtSecretString()}`).digest()
+  return Keypair.fromRawEd25519Seed(seed)
+}
+
+function getJwtSecretString(): string {
+  const secret = process.env.JWT_SECRET
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not set')
   }
-  return devServerKeypair
+  return secret
 }
 
 /**
  * Returns the jose SecretKey for JWT signing/verification.
  */
 function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set')
-  }
-  return new TextEncoder().encode(secret)
+  return new TextEncoder().encode(getJwtSecretString())
 }
 
 type BuildChallengeResult = {

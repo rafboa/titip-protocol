@@ -55,3 +55,35 @@ describe('SEP-10 challenge', () => {
     await expect(verifyChallenge(tx.toXDR())).rejects.toThrow(/server signing key/)
   })
 })
+
+describe('SEP-10 in dev without SEP10_SERVER_SECRET_KEY (the setup of this repo)', () => {
+  const oracle = Keypair.random()
+
+  it('does not use the oracle/admin key as the server key, so that account still has to sign', async () => {
+    const saved = process.env.SEP10_SERVER_SECRET_KEY
+    delete process.env.SEP10_SERVER_SECRET_KEY
+    process.env.ORACLE_SECRET_KEY = oracle.secret()
+    try {
+      const { buildChallenge, verifyChallenge } = await import('@/lib/auth/sep10')
+      const { transactionXdr } = await buildChallenge(oracle.publicKey())
+      await expect(verifyChallenge(transactionXdr)).rejects.toThrow(/signature from the client/)
+      expect((await verifyChallenge(sign(transactionXdr, oracle))).address).toBe(oracle.publicKey())
+    } finally {
+      process.env.SEP10_SERVER_SECRET_KEY = saved
+    }
+  })
+
+  it('keeps the same dev server key across calls, so open challenges survive', async () => {
+    const saved = process.env.SEP10_SERVER_SECRET_KEY
+    delete process.env.SEP10_SERVER_SECRET_KEY
+    try {
+      const { buildChallenge } = await import('@/lib/auth/sep10')
+      const source = (xdr: string) => new Transaction(xdr, Networks.TESTNET).source
+      const first = await buildChallenge(user.publicKey())
+      const second = await buildChallenge(user.publicKey())
+      expect(source(first.transactionXdr)).toBe(source(second.transactionXdr))
+    } finally {
+      process.env.SEP10_SERVER_SECRET_KEY = saved
+    }
+  })
+})
