@@ -16,6 +16,7 @@ import { resolveAdapter } from '../couriers/registry.js'
 import { confirmDelivery, submitConfirmDeliveryOnChain, submitDisputeOnChain } from '../stellar/submit.js'
 import { eventTypeForDeliveryStep } from '../stellar/quorum.js'
 import { config } from '../config.js'
+import { currentContractWhere } from '../queues/poll-queries.js'
 import type { CourierAdapter } from '../couriers/types.js'
 import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
 
@@ -150,8 +151,10 @@ const webhookDeps: WebhookDeps = {
       legs: { select: { seq: true, status: true } },
     } as const
 
+    // Escrows of an older contract count as unknown: their ids collide with the current contract's.
+    const contract = currentContractWhere(config.CONTRACT_ADDRESS)
     const primary = await prisma.escrow.findFirst({
-      where: { courierCode, trackingNumber },
+      where: { courierCode, trackingNumber, ...contract },
       orderBy: { createdAt: 'desc' },
       select: escrowSelect,
     })
@@ -169,7 +172,7 @@ const webhookDeps: WebhookDeps = {
     }
 
     const leg = await prisma.shipmentLeg.findFirst({
-      where: { courier: courierCode, trackingNumber },
+      where: { courier: courierCode, trackingNumber, escrow: contract },
       orderBy: { createdAt: 'desc' },
       include: { escrow: { select: escrowSelect } },
     })

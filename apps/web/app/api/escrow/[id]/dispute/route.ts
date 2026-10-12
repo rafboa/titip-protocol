@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { OLD_CONTRACT_ERROR, isOnCurrentContract } from '@/lib/stellar/current-contract';
 import { prisma } from '@titip/db';
 import { buildDisputeEscrowTx, submitSignedTx } from '@/lib/stellar/contracts/escrow';
 import { verifyJwt, getAuthorizationHeader } from '@/lib/auth/sep10';
@@ -25,6 +26,9 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized: Only buyer or seller can dispute' }, { status: 403 });
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 });
+    }
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
       return NextResponse.json(
         { error: `Cannot dispute escrow with status "${escrow.status}". Expected "FUNDED" or "SHIPPED".` },
@@ -73,6 +77,9 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: only buyer or seller can dispute this escrow' }, { status: 403 });
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 });
+    }
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
       return NextResponse.json(
         { error: `Cannot dispute escrow with status "${escrow.status}". Expected "FUNDED" or "SHIPPED".` },

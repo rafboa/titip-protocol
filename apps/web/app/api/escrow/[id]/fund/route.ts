@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { OLD_CONTRACT_ERROR, isOnCurrentContract } from '@/lib/stellar/current-contract'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
 import { submitSignedTx, getOnChainEscrow, buildFundEscrowTx } from '@/lib/stellar/contracts/escrow'
@@ -32,6 +33,9 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden: only the buyer can fund this escrow' }, { status: 403 })
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 })
+    }
     if (escrow.status !== 'PENDING') {
       return NextResponse.json({ error: `Cannot fund escrow with status "${escrow.status}"` }, { status: 409 })
     }
@@ -89,6 +93,9 @@ export async function POST(
       )
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 })
+    }
     if (escrow.status !== 'PENDING') {
       return NextResponse.json(
         { error: `Cannot fund escrow with status "${escrow.status}". Expected "PENDING".` },

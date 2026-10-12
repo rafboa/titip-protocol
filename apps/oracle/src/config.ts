@@ -23,6 +23,13 @@ const EnvSchema = z.object({
   APP_INTERNAL_API_URL: z.string().default('http://localhost:3000'),
   ORACLE_INTERNAL_API_KEY: z.string().min(1, 'ORACLE_INTERNAL_API_KEY is required'),
 
+  // The escrow contract this node serves. Falls back to NEXT_PUBLIC_CONTRACT_ADDRESS (the shared .env.local).
+  // When set, the pollers skip rows of older contracts, whose escrow ids collide with the current one.
+  CONTRACT_ADDRESS: z
+    .string()
+    .regex(/^C[A-Z2-7]{55}$/, 'CONTRACT_ADDRESS must be a Soroban contract id (C...)')
+    .optional(),
+
   // Oracle identity
   // Also names this node's BullMQ queue, so it must be unique per node and queue-name safe
   // (BullMQ rejects ":"); same character set the web app accepts for oracle_events.
@@ -50,7 +57,10 @@ const EnvSchema = z.object({
 })
 
 function loadConfig() {
-  const parsed = EnvSchema.safeParse(process.env)
+  const parsed = EnvSchema.safeParse({
+    ...process.env,
+    CONTRACT_ADDRESS: process.env.CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || undefined,
+  })
   if (!parsed.success) {
     console.error('❌ Oracle config validation failed:')
     console.error(parsed.error.flatten().fieldErrors)

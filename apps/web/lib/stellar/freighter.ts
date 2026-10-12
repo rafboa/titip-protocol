@@ -21,8 +21,31 @@ export class FreighterError extends Error {
   }
 }
 
+/**
+ * Without the extension the Freighter API never answers (it waits for a message from the extension),
+ * which left every button spinning forever. Questions that the extension answers instantly get a
+ * deadline; signing itself does not, since the user may take time to approve.
+ */
+export const FREIGHTER_RESPONSE_TIMEOUT_MS = 4000;
+
+function withFreighterDeadline<T>(request: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new FreighterError('NOT_INSTALLED', 'Freighter wallet not detected or connection refused.')),
+      FREIGHTER_RESPONSE_TIMEOUT_MS
+    );
+  });
+  return Promise.race([request, deadline]).finally(() => clearTimeout(timer));
+}
+
 export async function checkConnection(): Promise<boolean> {
-  const connected = await freighterIsConnected();
+  let connected: Awaited<ReturnType<typeof freighterIsConnected>>;
+  try {
+    connected = await withFreighterDeadline(freighterIsConnected());
+  } catch {
+    return false;
+  }
   if ('error' in connected && connected.error) return false;
   if (!connected.isConnected) return false;
 
@@ -56,7 +79,7 @@ export function expectedFreighterNetwork(): 'TESTNET' | 'PUBLIC' {
  */
 export async function assertCorrectNetwork(): Promise<void> {
   const expected = expectedFreighterNetwork();
-  const details = await freighterGetNetwork();
+  const details = await withFreighterDeadline(freighterGetNetwork());
   // English default message (dev/log fallback) — UI layers localize by
   // catching FreighterError and mapping .code + .vars through useTranslation().
   if ('error' in details && details.error) {
