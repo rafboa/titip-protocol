@@ -4,7 +4,7 @@
 // For each job it:
 //  1. Picks the right courier adapter (JNT, JNE, SiCepat)
 //  2. Calls the courier's tracking API with a 10s timeout
-//  3. Logs the result to oracle_events regardless of outcome (claude.md spec)
+//  3. Logs to oracle_events: non-delivered polls, errors, and the chain tx this node sent
 //  4. If delivered → signs confirm_delivery on-chain, then POSTs /api/oracle/confirm
 //  5. If not delivered → job is "done" (BullMQ will re-schedule via the poller)
 
@@ -16,6 +16,7 @@ import { jneAdapter } from '../couriers/jne.js'
 import { sicepatAdapter } from '../couriers/sicepat.js'
 import { mockAdapter } from '../couriers/mock.js'
 import { confirmDelivery, submitConfirmDeliveryOnChain, submitDisputeOnChain } from '../stellar/submit.js'
+import { eventTypeForDeliveryStep } from '../stellar/quorum.js'
 import { config } from '../config.js'
 import type { CourierAdapter } from '../couriers/types.js'
 import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
@@ -70,19 +71,15 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
     throw err
   }
 
-  // Always log the poll result
-  await logOracleEvent(
-    escrowId,
-    trackingResult.delivered ? 'DELIVERY_CONFIRMED' : 'POLL_NO_UPDATE',
-    trackingResult.raw
-  )
-
   if (!trackingResult.delivered) {
+    await logOracleEvent(escrowId, 'POLL_NO_UPDATE', trackingResult.raw)
     console.log(
       `[worker] Job ${job.id} — not delivered yet. Status: "${trackingResult.statusText}"`
     )
     return // Job complete; poller will re-enqueue on next cycle
   }
+  // A delivered poll is logged below, after the chain step: the poller re-enqueues this job every
+  // cycle, so only the cycle where this node actually sent a transaction is an event.
 
   // Multi-leg shipments: the primary tracking number being delivered is not the end of the
   // journey. Release is decided per leg by handleWebhookEvent (webhook path) only.
@@ -104,7 +101,21 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
   })
   if (!escrow) throw new Error(`Escrow ${escrowId} not found in DB`)
 
-  const { released, txHash } = await submitConfirmDeliveryOnChain(escrow.contractAddress, escrow.contractEscrowId)
+  let delivery: Awaited<ReturnType<typeof submitConfirmDeliveryOnChain>>
+  try {
+    delivery = await submitConfirmDeliveryOnChain(escrow.contractAddress, escrow.contractEscrowId)
+  } catch (err) {
+    await logOracleEvent(escrowId, 'SUBMIT_ERROR', {
+      error: err instanceof Error ? err.message : String(err),
+      courierResponse: trackingResult.raw,
+    })
+    throw err // BullMQ retries with backoff
+  }
+  const { released, txHash, step } = delivery
+  const eventType = eventTypeForDeliveryStep(step, txHash)
+  if (eventType) {
+    await logOracleEvent(escrowId, eventType, { step, released, txHash, courierResponse: trackingResult.raw })
+  }
   if (!released) {
     console.log(`[worker] Job ${job.id} — approval sent for escrow ${escrowId}; waiting for the other oracles`)
     return

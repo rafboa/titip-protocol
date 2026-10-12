@@ -15,7 +15,13 @@ import {
   scValToNative,
 } from '@stellar/stellar-sdk'
 import { config } from '../config.js'
-import { decideDeliveryStep, isAlreadyDeliveredResponse, parseApprovals, parseOracleSet } from './quorum.js'
+import {
+  decideDeliveryStep,
+  isAlreadyDeliveredResponse,
+  parseApprovals,
+  parseOracleSet,
+  type DeliveryStep,
+} from './quorum.js'
 
 // TODO(mainnet): verify passphrase, RPC URL and fee multiplier before deploying.
 const NETWORK_PASSPHRASE =
@@ -118,6 +124,8 @@ export type DeliveryResult = {
   released: boolean
   /** Hash of the transaction this node sent, or null if it sent none. */
   txHash: string | null
+  /** Which step this node took; lets callers record only the calls that did something. */
+  step: DeliveryStep['kind']
 }
 
 /**
@@ -153,7 +161,7 @@ export async function submitConfirmDeliveryOnChain(
 
   switch (step.kind) {
     case 'already-delivered':
-      return { released: true, txHash: null }
+      return { released: true, txHash: null, step: step.kind }
     case 'wrong-status':
       throw new Error(`Escrow ${contractEscrowId} is "${step.status}" on chain; expected "Shipped"`)
     case 'not-in-set':
@@ -162,7 +170,7 @@ export async function submitConfirmDeliveryOnChain(
       console.log(
         `[submit] escrow ${contractEscrowId}: waiting for quorum (${step.approvals}/${step.threshold} approvals)`
       )
-      return { released: false, txHash: null }
+      return { released: false, txHash: null, step: step.kind }
     case 'confirm-delivery':
     case 'approve': {
       try {
@@ -174,11 +182,11 @@ export async function submitConfirmDeliveryOnChain(
                 nativeToScVal(me, { type: 'address' }),
               ])
         const after = await getOnChainStatus(contractAddress, contractEscrowId)
-        return { released: after === 'Delivered', txHash }
+        return { released: after === 'Delivered', txHash, step: step.kind }
       } catch (err) {
         // Another oracle completed the quorum between our read and our transaction.
         if ((await getOnChainStatus(contractAddress, contractEscrowId)) === 'Delivered') {
-          return { released: true, txHash: null }
+          return { released: true, txHash: null, step: step.kind }
         }
         throw err
       }
@@ -225,7 +233,12 @@ export async function confirmDelivery(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.ORACLE_INTERNAL_API_KEY}`,
     },
-    body: JSON.stringify({ escrowId, courierResponse, ...(txHash ? { txHash } : {}) }),
+    body: JSON.stringify({
+      escrowId,
+      courierResponse,
+      nodeId: config.ORACLE_NODE_ID,
+      ...(txHash ? { txHash } : {}),
+    }),
     signal: AbortSignal.timeout(30_000),
   })
 

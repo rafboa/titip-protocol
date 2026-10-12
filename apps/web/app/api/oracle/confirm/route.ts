@@ -16,6 +16,9 @@ const ConfirmSchema = z.object({
   txHash: z.string().regex(/^[0-9a-fA-F]{64}$/, 'txHash must be a 64-char hex string').optional(),
   // v1.1: Accept courierResponse JSON for audit trail
   courierResponse: z.record(z.string(), z.any()).optional(),
+  // Which oracle node synced this delivery; a label for oracle_events (callers are already
+  // authenticated by the shared internal key, so this is not an identity claim).
+  nodeId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'nodeId must be 1-64 chars of A-Z a-z 0-9 _ -').optional(),
 })
 
 import crypto from 'crypto'
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { escrowId, courierResponse, txHash } = parsed.data
+    const { escrowId, courierResponse, txHash, nodeId } = parsed.data
 
     const escrow = await prisma.escrow.findUnique({ where: { id: escrowId } })
 
@@ -100,7 +103,7 @@ export async function POST(request: NextRequest) {
           escrowId,
           eventType: 'DELIVERY_CONFIRMED',
           courierResponse: (courierResponse ?? undefined) as Prisma.InputJsonValue | undefined,
-          oracleNodeId: 'oracle-primary', // v1.1: Support multiple oracle nodes
+          oracleNodeId: nodeId ?? 'unknown',
         },
       }),
       // Notify seller — funds released
