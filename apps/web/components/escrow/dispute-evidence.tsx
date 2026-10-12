@@ -6,7 +6,8 @@ import { FileImage, ImagePlus, Loader2, AlertCircle, CheckCircle2, ExternalLink 
 import { signTx, FreighterError } from '@/lib/stellar/freighter';
 import { useTranslation } from '@/lib/i18n/use-translation';
 import { truncateAddress } from '@/lib/utils';
-import { EVIDENCE_MIME_TYPES, MAX_EVIDENCE_BYTES, sha256HexOfBlob } from '@/lib/evidence/file';
+import { EVIDENCE_MIME_TYPES, sha256HexOfBlob } from '@/lib/evidence/file';
+import { MAX_PHOTO_INPUT_BYTES, PhotoError, formatFileSize, prepareEvidencePhoto } from '@/lib/evidence/photo';
 import type { EvidenceItem } from '@/lib/evidence/merge';
 
 import { Card } from '@/components/ui/card';
@@ -33,6 +34,7 @@ export function DisputeEvidence({ escrowId }: { escrowId: string }) {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
@@ -47,19 +49,29 @@ export function DisputeEvidence({ escrowId }: { escrowId: string }) {
     refetchInterval: 15000,
   });
 
-  const pickFile = (picked: File | undefined) => {
+  const pickFile = async (picked: File | undefined) => {
     if (!picked) return;
     setError(null);
     setJustSubmitted(false);
+    setFile(null);
     if (!(EVIDENCE_MIME_TYPES as readonly string[]).includes(picked.type)) {
       setError(t('evidence.notImage'));
       return;
     }
-    if (picked.size > MAX_EVIDENCE_BYTES) {
+    if (picked.size > MAX_PHOTO_INPUT_BYTES) {
       setError(t('evidence.tooLarge'));
       return;
     }
-    setFile(picked);
+    try {
+      setIsPreparing(true);
+      // Resized and re-encoded here: location/camera metadata is dropped and the hash is of what is uploaded.
+      setFile(await prepareEvidencePhoto(picked));
+    } catch (err) {
+      setError(t(err instanceof PhotoError && err.code === 'TOO_LARGE' ? 'evidence.stillTooLarge' : 'evidence.decodeFailed'));
+    } finally {
+      setIsPreparing(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
   };
 
   const handleSubmit = async () => {
@@ -142,21 +154,34 @@ export function DisputeEvidence({ escrowId }: { escrowId: string }) {
                 accept={EVIDENCE_MIME_TYPES.join(',')}
                 className="sr-only"
                 aria-label={t('evidence.choosePhoto')}
-                onChange={(e) => pickFile(e.target.files?.[0])}
-                disabled={isSubmitting}
+                onChange={(e) => void pickFile(e.target.files?.[0])}
+                disabled={isSubmitting || isPreparing}
               />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => inputRef.current?.click()}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isPreparing}
                   className="w-full sm:w-auto"
                 >
-                  <ImagePlus size={18} /> {file ? t('evidence.changePhoto') : t('evidence.choosePhoto')}
+                  {isPreparing ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> {t('evidence.preparing')}
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus size={18} /> {file ? t('evidence.changePhoto') : t('evidence.choosePhoto')}
+                    </>
+                  )}
                 </Button>
-                {file && <span className="truncate text-sm text-muted-foreground">{file.name}</span>}
               </div>
+
+              {file && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {t('evidence.prepared', { size: formatFileSize(file.size) })}
+                </p>
+              )}
 
               {file && (
                 <Button onClick={handleSubmit} disabled={isSubmitting} className="mt-4 w-full sm:w-auto">
