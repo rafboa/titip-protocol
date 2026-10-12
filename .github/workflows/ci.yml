@@ -77,3 +77,33 @@ jobs:
       - name: Build WASM
         run: cargo build --target wasm32v1-none --release
         working-directory: packages/contracts
+
+  migrate:
+    name: Prisma migrate deploy
+    needs: [web-oracle, contracts]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: migrate-production
+      cancel-in-progress: false
+    env:
+      # Direct (non-pooled) connection string, set under Settings > Secrets > Actions.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Check secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set; skipping would hide unapplied migrations."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Install only the pinned Prisma CLI; no need for the full monorepo.
+      - name: Apply migrations
+        run: npx --yes prisma@6.19.3 migrate deploy --schema packages/db/prisma/schema.prisma
