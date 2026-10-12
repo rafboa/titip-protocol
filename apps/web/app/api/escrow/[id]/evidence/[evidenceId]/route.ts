@@ -21,6 +21,7 @@ import {
 } from '@/lib/evidence/access'
 import { MAX_EVIDENCE_PER_PARTY } from '@/lib/evidence/file'
 import { slotsUsed } from '@/lib/evidence/merge'
+import { getEvidenceObject } from '@/lib/evidence/storage'
 
 const EXTENSIONS: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 
@@ -60,20 +61,30 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       if (!committed) return NextResponse.json({ error: 'Evidence not found' }, { status: 404 })
     }
 
-    const blob = await prisma.evidenceBlob.findUnique({ where: { evidenceId: row.id } })
-    if (!blob) return NextResponse.json({ error: 'The file is no longer available' }, { status: 404 })
+    let data: Uint8Array | null
+    if (row.storageKey) {
+      try {
+        data = await getEvidenceObject(row.storageKey)
+      } catch (err: unknown) {
+        console.error('[GET /api/escrow/:id/evidence/:evidenceId] object storage read failed:', err)
+        return NextResponse.json({ error: 'Failed to read the evidence file' }, { status: 502 })
+      }
+    } else {
+      data = (await prisma.evidenceBlob.findUnique({ where: { evidenceId: row.id } }))?.data ?? null
+    }
+    if (!data) return NextResponse.json({ error: 'The file is no longer available' }, { status: 404 })
 
     // The hash on-chain is the point of the whole feature: never serve bytes that no longer match it.
-    const actual = crypto.createHash('sha256').update(blob.data).digest('hex')
+    const actual = crypto.createHash('sha256').update(data).digest('hex')
     if (actual !== row.sha256) {
       console.error(`[evidence] stored file ${row.id} does not match its committed hash`)
       return NextResponse.json({ error: 'Stored file does not match its committed hash' }, { status: 500 })
     }
 
-    return new Response(new Uint8Array(blob.data), {
+    return new Response(new Uint8Array(data), {
       headers: {
         'Content-Type': row.mimeType,
-        'Content-Length': String(blob.data.length),
+        'Content-Length': String(data.length),
         'Content-Disposition': `inline; filename="evidence-${row.sha256.slice(0, 12)}.${EXTENSIONS[row.mimeType] ?? 'bin'}"`,
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'; sandbox",

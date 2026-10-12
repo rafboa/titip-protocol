@@ -171,6 +171,8 @@ model EvidenceFile {
   committedAt DateTime?     @map("committed_at")
   /// Hash of the submit_evidence transaction; null if the item was already on-chain when committed.
   txHash      String?       @map("tx_hash")
+  /// Object-storage key when the bytes live in S3/R2; null means they are in evidence_blobs.
+  storageKey  String?       @map("storage_key")
   escrow      Escrow        @relation(fields: [escrowId], references: [id])
   blob        EvidenceBlob?
   @@unique([escrowId, submitter, sha256])
@@ -178,7 +180,7 @@ model EvidenceFile {
   @@map("evidence_files")
 }
 
-// v1.1: move the bytes to object storage (Supabase Storage / S3) and keep only a key here.
+// Legacy/fallback store: used when object storage is not configured (see lib/evidence/storage.ts).
 model EvidenceBlob {
   evidenceId String       @id @map("evidence_id")
   data       Bytes

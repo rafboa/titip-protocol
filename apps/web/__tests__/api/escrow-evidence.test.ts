@@ -23,7 +23,18 @@ const chainMock = vi.hoisted(() => ({
   submitSignedTx: vi.fn(),
 }))
 
+const storageMock = vi.hoisted(() => ({
+  isObjectStorageConfigured: vi.fn(),
+  putEvidenceObject: vi.fn(),
+  getEvidenceObject: vi.fn(),
+  deleteEvidenceObjects: vi.fn(),
+}))
+
 vi.mock('@titip/db', () => ({ prisma: prismaMock }))
+vi.mock('@/lib/evidence/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/evidence/storage')>()),
+  ...storageMock,
+}))
 vi.mock('@/lib/auth/sep10', () => ({ verifyJwt, getAuthorizationHeader }))
 vi.mock('@/lib/stellar/contracts/escrow', () => chainMock)
 vi.mock('@/lib/stellar/config', () => ({ STELLAR_CONFIG: { contractAddress: 'CCURRENT' } }))
@@ -109,6 +120,61 @@ beforeEach(() => {
   chainMock.getOnChainEvidence.mockResolvedValue([])
   chainMock.buildSubmitEvidenceTx.mockResolvedValue('UNSIGNED_XDR')
   chainMock.submitSignedTx.mockResolvedValue('a'.repeat(64))
+})
+
+describe('object storage', () => {
+  beforeEach(() => {
+    storageMock.isObjectStorageConfigured.mockReturnValue(true)
+    storageMock.putEvidenceObject.mockResolvedValue(undefined)
+  })
+
+  it('stores the bytes in the bucket and keeps only the key in Postgres', async () => {
+    const bytes = jpeg()
+    const res = await uploadEvidence(uploadReq(bytes), listCtx)
+    expect(res.status).toBe(200)
+    const key = `evidence/esc1/${BUYER}/${sha(bytes)}`
+    expect(storageMock.putEvidenceObject).toHaveBeenCalledWith(key, expect.any(Uint8Array), 'image/jpeg')
+    const data = prismaMock.evidenceFile.create.mock.calls[0][0].data
+    expect(data).toMatchObject({ storageKey: key })
+    expect(data).not.toHaveProperty('blob')
+  })
+
+  it('does not create a row when the bucket write fails', async () => {
+    storageMock.putEvidenceObject.mockRejectedValue(new Error('bucket down'))
+    expect((await uploadEvidence(uploadReq(jpeg()), listCtx)).status).toBe(502)
+    expect(prismaMock.evidenceFile.create).not.toHaveBeenCalled()
+  })
+
+  it('also removes the objects of abandoned uploads it drops', async () => {
+    const pending = Array.from({ length: 5 }, (_, i) => ({ id: `p${i}`, sha256: `h${i}`, storageKey: `k${i}` }))
+    prismaMock.evidenceFile.findMany.mockResolvedValue(pending)
+    await uploadEvidence(uploadReq(jpeg()), listCtx)
+    const dropped = storageMock.deleteEvidenceObjects.mock.calls[0]?.[0] as string[]
+    expect(dropped.length).toBeGreaterThan(0)
+    expect(dropped[0]).toBe('k0')
+  })
+
+  it('serves a download from the bucket when the row has a storage key', async () => {
+    const bytes = jpeg(16)
+    verifyJwt.mockResolvedValue({ address: SELLER })
+    prismaMock.evidenceFile.findFirst.mockResolvedValue(
+      row({ sha256: sha(bytes), committedAt: new Date(), sizeBytes: bytes.length, storageKey: 'evidence/k' })
+    )
+    storageMock.getEvidenceObject.mockResolvedValue(bytes)
+    const res = await downloadEvidence(getReq('/ev1'), itemCtx)
+    expect(res.status).toBe(200)
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes)
+    expect(prismaMock.evidenceBlob.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 when the object is gone and 502 when the bucket errors', async () => {
+    verifyJwt.mockResolvedValue({ address: SELLER })
+    prismaMock.evidenceFile.findFirst.mockResolvedValue(row({ committedAt: new Date(), storageKey: 'evidence/k' }))
+    storageMock.getEvidenceObject.mockResolvedValue(null)
+    expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(404)
+    storageMock.getEvidenceObject.mockRejectedValue(new Error('bucket down'))
+    expect((await downloadEvidence(getReq('/ev1'), itemCtx)).status).toBe(502)
+  })
 })
 
 describe('POST /api/escrow/[id]/evidence (upload)', () => {

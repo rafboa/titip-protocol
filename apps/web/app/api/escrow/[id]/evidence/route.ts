@@ -25,6 +25,12 @@ import {
   evidenceUri,
 } from '@/lib/evidence/file'
 import { buildEvidenceList, slotsUsed } from '@/lib/evidence/merge'
+import {
+  deleteEvidenceObjects,
+  evidenceStorageKey,
+  isObjectStorageConfigured,
+  putEvidenceObject,
+} from '@/lib/evidence/storage'
 
 // Multipart framing around the file; keeps the early Content-Length check from rejecting a max-size file.
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -149,19 +155,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const pending = await prisma.evidenceFile.findMany({
         where: { escrowId: id, submitter: caller.address, committedAt: null },
         orderBy: { createdAt: 'asc' },
-        select: { id: true, sha256: true },
+        select: { id: true, sha256: true, storageKey: true },
       })
       const abandoned = pending.filter(
         (p) => !chain.some((c) => c.submitter === caller.address && c.hash === p.sha256)
       )
       const excess = abandoned.length - (MAX_PENDING_UPLOADS_PER_PARTY - 1)
       if (excess > 0) {
-        await prisma.evidenceFile.deleteMany({ where: { id: { in: abandoned.slice(0, excess).map((p) => p.id) } } })
+        const dropped = abandoned.slice(0, excess)
+        await prisma.evidenceFile.deleteMany({ where: { id: { in: dropped.map((p) => p.id) } } })
+        await deleteEvidenceObjects(dropped.flatMap((p) => (p.storageKey ? [p.storageKey] : [])))
+      }
+
+      // Object storage when configured, Postgres otherwise. The object goes first: a row must never
+      // point at bytes that were not stored. The key is deterministic, so a retry overwrites the same object.
+      let storage: { storageKey: string } | { blob: { create: { data: Uint8Array<ArrayBuffer> } } }
+      if (isObjectStorageConfigured()) {
+        const storageKey = evidenceStorageKey(id, caller.address, sha256)
+        try {
+          await putEvidenceObject(storageKey, bytes, mimeType)
+        } catch (err: unknown) {
+          console.error('[POST /api/escrow/:id/evidence] object storage write failed:', err)
+          return NextResponse.json({ error: 'Failed to store the evidence file' }, { status: 502 })
+        }
+        storage = { storageKey }
+      } else {
+        storage = { blob: { create: { data: bytes } } }
       }
 
       try {
         row = await prisma.evidenceFile.create({
-          data: { ...key, mimeType, sizeBytes: bytes.length, blob: { create: { data: bytes } } },
+          data: { ...key, mimeType, sizeBytes: bytes.length, ...storage },
         })
       } catch (err: unknown) {
         if (!isUniqueViolation(err)) throw err
