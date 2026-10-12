@@ -10,6 +10,7 @@ import { PrismaClient } from '@prisma/client'
 import { config } from './config.js'
 import { trackingQueue } from './queues/tracking.js'
 import { createTrackingWorker } from './workers/tracking-worker.js'
+import { nextWebhookCursor, shippedEscrowsWhere, webhookBatchQuery, type WebhookCursor } from './queues/poll-queries.js'
 
 const prisma = new PrismaClient()
 
@@ -27,11 +28,7 @@ async function pollShippedEscrows(): Promise<void> {
 
   try {
     escrows = await prisma.escrow.findMany({
-      where: {
-        status: 'SHIPPED',
-        trackingNumber: { not: null },
-        courierCode: { not: null },
-      },
+      where: shippedEscrowsWhere(config.CONTRACT_ADDRESS),
       select: {
         id: true,
         trackingNumber: true,
@@ -67,15 +64,15 @@ async function pollShippedEscrows(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Poller: hand unprocessed webhook events (persisted by the web app) to the worker.
 // jobId = event id, so a re-poll while the job is queued/active never duplicates it.
+// A cursor walks through all unprocessed events, one page per cycle (see poll-queries.ts).
 // ---------------------------------------------------------------------------
+const WEBHOOK_BATCH_SIZE = 100
+let webhookCursor: WebhookCursor = null
+
 async function pollWebhookEvents(): Promise<void> {
   try {
-    const events = await prisma.webhookEvent.findMany({
-      where: { processedAt: null },
-      select: { id: true },
-      orderBy: { receivedAt: 'asc' },
-      take: 100,
-    })
+    const events = await prisma.webhookEvent.findMany(webhookBatchQuery(webhookCursor, WEBHOOK_BATCH_SIZE))
+    webhookCursor = nextWebhookCursor(events, WEBHOOK_BATCH_SIZE)
     for (const event of events) {
       await trackingQueue.add(
         'webhook-event',
@@ -111,6 +108,7 @@ async function shutdown(worker: ReturnType<typeof createTrackingWorker>): Promis
 console.log('🚀 Titip Protocol Oracle Service starting...')
 console.log(`   Environment: ${config.STELLAR_NETWORK}`)
 console.log(`   Node ID: ${config.ORACLE_NODE_ID}`)
+console.log(`   Contract: ${config.CONTRACT_ADDRESS ?? '(any: CONTRACT_ADDRESS not set)'}`)
 console.log(`   Poll interval: ${config.POLL_INTERVAL_MS}ms`)
 console.log(`   App URL: ${config.APP_INTERNAL_API_URL}`)
 console.log('')

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { OLD_CONTRACT_ERROR, isOnCurrentContract } from '@/lib/stellar/current-contract'
 import { prisma } from '@titip/db'
 import { z } from 'zod'
 import { buildClaimRefundTx, submitSignedTx, getOnChainEscrow } from '@/lib/stellar/contracts/escrow'
@@ -35,6 +36,9 @@ export async function GET(
       )
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 })
+    }
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
       return NextResponse.json(
         { error: `Cannot refund escrow with status "${escrow.status}".` },
@@ -104,6 +108,9 @@ export async function POST(
       )
     }
 
+    if (!isOnCurrentContract(escrow)) {
+      return NextResponse.json({ error: OLD_CONTRACT_ERROR }, { status: 409 })
+    }
     if (escrow.status !== 'FUNDED' && escrow.status !== 'SHIPPED') {
       return NextResponse.json(
         { error: `Cannot refund escrow with status "${escrow.status}".` },
