@@ -61,6 +61,18 @@ sebelumnya: satu oracle (`confirm_delivery`).
 - Node yang kalah balapan menyetujui terakhir tidak gagal: bila escrow sudah `Delivered`, ia dianggap berhasil.
 - Hanya satu callback ke web yang berhasil menyinkronkan DB. Node lain menerima 409 "sudah DELIVERED" dan menganggapnya sukses.
 - Bila kunci node tidak ada di himpunan, node berhenti dengan galat yang jelas (periksa `ORACLE_SECRET_KEY`).
+- **Satu antrean per node.** Antrean BullMQ bernama `tracking-<ORACLE_NODE_ID>`, jadi setiap node mengevaluasi
+  setiap escrow sendiri dan menyetujuinya. `ORACLE_NODE_ID` harus **unik per node** dan hanya berisi
+  `A-Z a-z 0-9 _ -` (maksimal 64 karakter); dua node dengan ID sama akan berbagi antrean dan kembali
+  ke perilaku lama. Antrean lama `tracking` tidak dipakai lagi.
+- **Webhook kurir** untuk pengiriman akhir tetap berstatus belum diproses selama kuorum belum tercapai, supaya
+  setiap node ikut menyetujui; baru ditandai selesai setelah dana dirilis. Event yang kuorumnya tidak pernah
+  tercapai (misalnya hanya satu node hidup) tetap terbuka dan diperiksa ulang tiap siklus.
+- Dua node yang menyetujui pada ledger yang sama bisa membuat salah satu transaksi gagal; node itu membaca ulang
+  keadaan kontrak dan mencoba lagi (maksimal 3 percobaan) tanpa menunggu antrean.
+- Event di `oracle_events`: `DELIVERY_SUBMITTED` hanya saat node mengirim transaksi, `DELIVERY_CONFIRMED` sekali saat DB disinkronkan,
+  `SUBMIT_ERROR` saat pengiriman gagal.
+- Di mainnet adapter kurir mock dimatikan: kurir tanpa kunci API atau tanpa adapter membuat job gagal, bukan "terkirim".
 
 ## Batasan yang perlu dipahami
 

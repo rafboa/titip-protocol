@@ -24,7 +24,12 @@ const EnvSchema = z.object({
   ORACLE_INTERNAL_API_KEY: z.string().min(1, 'ORACLE_INTERNAL_API_KEY is required'),
 
   // Oracle identity
-  ORACLE_NODE_ID: z.string().default('oracle-primary'),
+  // Also names this node's BullMQ queue, so it must be unique per node and queue-name safe
+  // (BullMQ rejects ":"); same character set the web app accepts for oracle_events.
+  ORACLE_NODE_ID: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/, 'ORACLE_NODE_ID must be 1-64 chars of A-Z a-z 0-9 _ -')
+    .default('oracle-primary'),
 
   // Courier API keys (optional — adapters handle missing keys gracefully)
   JNT_API_KEY: z.string().optional(),

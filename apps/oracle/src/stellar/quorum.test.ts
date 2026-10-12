@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   decideDeliveryStep,
   eventTypeForDeliveryStep,
+  isRetryableSubmitError,
   isAlreadyDeliveredResponse,
   parseApprovals,
   parseOracleSet,
@@ -119,5 +120,13 @@ describe('parsers', () => {
     expect(eventTypeForDeliveryStep('already-delivered', null)).toBeNull()
     // Lost the race to the final approval: our tx failed, the other node's release counts.
     expect(eventTypeForDeliveryStep('approve', null)).toBeNull()
+  })
+
+  it('isRetryableSubmitError retries failed transactions only', () => {
+    expect(isRetryableSubmitError(new Error('approve_delivery did not succeed: FAILED'))).toBe(true)
+    expect(isRetryableSubmitError(new Error('approve_delivery submission failed: {"x":1}'))).toBe(true)
+    expect(isRetryableSubmitError(new Error('Oracle key GX is not in the oracle set'))).toBe(false)
+    expect(isRetryableSubmitError(new Error('get_oracle_set simulation failed: HostError'))).toBe(false)
+    expect(isRetryableSubmitError('weird')).toBe(false)
   })
 })

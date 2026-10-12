@@ -53,10 +53,10 @@ function makeDeps(ev: WebhookEventRow | null, ref: ShipmentRef | null): WebhookD
     getEvent: vi.fn().mockResolvedValue(ev),
     resolveShipment: vi.fn().mockResolvedValue(ref),
     recordLegStage: vi.fn().mockResolvedValue(undefined),
-    markProcessed: vi.fn().mockResolvedValue(undefined),
+    claimProcessed: vi.fn().mockResolvedValue(true),
     logOracleEvent: vi.fn().mockResolvedValue(undefined),
     notify: vi.fn().mockResolvedValue(undefined),
-    submitConfirmDelivery: vi.fn().mockResolvedValue({ released: true, txHash: 'a'.repeat(64) }),
+    submitConfirmDelivery: vi.fn().mockResolvedValue({ released: true, txHash: 'a'.repeat(64), step: 'approve' }),
     syncDelivery: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -69,7 +69,7 @@ describe('handleWebhookEvent - single shipment', () => {
   it('skips an event that does not exist', async () => {
     deps = makeDeps(null, null)
     expect(await handleWebhookEvent('w1', deps)).toBe('skipped-missing')
-    expect(deps.markProcessed).not.toHaveBeenCalled()
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
   })
 
   it('skips an already processed event (replay / duplicate job)', async () => {
@@ -82,7 +82,7 @@ describe('handleWebhookEvent - single shipment', () => {
   it('marks the event processed when no escrow matches the tracking number', async () => {
     deps = makeDeps(event('DELIVERED'), null)
     expect(await handleWebhookEvent('w1', deps)).toBe('no-escrow')
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
   })
 
@@ -91,7 +91,7 @@ describe('handleWebhookEvent - single shipment', () => {
     expect(await handleWebhookEvent('w1', deps)).toBe('logged')
     expect(deps.logOracleEvent).toHaveBeenCalledWith('esc1', `WEBHOOK_${stage}`, { status: stage })
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
   })
 
   it('confirms delivery on-chain and syncs the web app for DELIVERED on a SHIPPED escrow', async () => {
@@ -99,30 +99,51 @@ describe('handleWebhookEvent - single shipment', () => {
     expect(await handleWebhookEvent('w1', deps)).toBe('delivered')
     expect(deps.submitConfirmDelivery).toHaveBeenCalledWith('CCONTRACT', 7n)
     expect(deps.syncDelivery).toHaveBeenCalledWith('esc1', { status: 'DELIVERED' }, 'a'.repeat(64))
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
   })
 
   it('syncs the web app even when the final approval was sent by another oracle (no tx from this node)', async () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
-    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: true, txHash: null })
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: true, txHash: null, step: 'already-delivered' })
     expect(await handleWebhookEvent('w1', deps)).toBe('delivered')
     expect(deps.syncDelivery).toHaveBeenCalledWith('esc1', { status: 'DELIVERED' }, null)
   })
 
-  it('does not sync the web app while the oracle quorum is not reached, and finishes this event', async () => {
+  it('does not sync or finish the event while the oracle quorum is not reached, so every node can approve', async () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
-    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: 'b'.repeat(64) })
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: 'b'.repeat(64), step: 'approve' })
     expect(await handleWebhookEvent('w1', deps)).toBe('awaiting-quorum')
     expect(deps.syncDelivery).not.toHaveBeenCalled()
-    expect(deps.logOracleEvent).toHaveBeenCalledWith('esc1', 'WEBHOOK_DELIVERED', { status: 'DELIVERED' })
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
+    // The approval this node sent is the only event; the webhook itself is not logged yet.
+    expect(deps.logOracleEvent).toHaveBeenCalledTimes(1)
+    expect(deps.logOracleEvent).toHaveBeenCalledWith('esc1', 'DELIVERY_SUBMITTED', {
+      step: 'approve',
+      released: false,
+      txHash: 'b'.repeat(64),
+    })
+  })
+
+  it('writes nothing when a node that already approved re-handles the pending event', async () => {
+    deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: null, step: 'waiting' })
+    expect(await handleWebhookEvent('w1', deps)).toBe('awaiting-quorum')
+    expect(deps.logOracleEvent).not.toHaveBeenCalled()
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
+  })
+
+  it('logs the webhook and the approval of this node once the delivery is released, then finishes the event', async () => {
+    deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
+    expect(await handleWebhookEvent('w1', deps)).toBe('delivered')
+    expect(vi.mocked(deps.logOracleEvent).mock.calls.map((c) => c[1])).toEqual(['DELIVERY_SUBMITTED', 'WEBHOOK_DELIVERED'])
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
   })
 
   it('does not mark the event processed when the chain call fails, so the job can retry', async () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
     vi.mocked(deps.submitConfirmDelivery).mockRejectedValue(new Error('rpc down'))
     await expect(handleWebhookEvent('w1', deps)).rejects.toThrow('rpc down')
-    expect(deps.markProcessed).not.toHaveBeenCalled()
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
   })
 
   it.each(['DELIVERED', 'REFUNDED', 'PENDING'])(
@@ -166,7 +187,7 @@ describe('handleWebhookEvent - multi-leg shipments', () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED', { isFinal: false }))
     expect(await handleWebhookEvent('w1', deps)).toBe('leg-delivered')
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
   })
 
   it('does not release funds when a middle leg is delivered, but records its stage', async () => {
@@ -188,13 +209,13 @@ describe('handleWebhookEvent - multi-leg shipments', () => {
     expect(await handleWebhookEvent('w1', deps)).toBe('deferred')
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
     expect(deps.logOracleEvent).not.toHaveBeenCalled()
-    expect(deps.markProcessed).not.toHaveBeenCalled()
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
   })
 
   it('defers events of a proposed (not yet approved) leg so they are not lost if the buyer approves later', async () => {
     deps = makeDeps(event('DELIVERED'), leg('SHIPPED', { legStatus: 'PROPOSED', isFinal: false }))
     expect(await handleWebhookEvent('w1', deps)).toBe('deferred')
-    expect(deps.markProcessed).not.toHaveBeenCalled()
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
     expect(deps.recordLegStage).not.toHaveBeenCalled()
   })
 
@@ -203,7 +224,7 @@ describe('handleWebhookEvent - multi-leg shipments', () => {
     expect(await handleWebhookEvent('w1', deps)).toBe('leg-not-approved')
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
     expect(deps.recordLegStage).not.toHaveBeenCalled()
-    expect(deps.markProcessed).toHaveBeenCalledWith('w1')
+    expect(deps.claimProcessed).toHaveBeenCalledWith('w1')
   })
 
   it('opens a dispute when a middle leg is returned to sender', async () => {
@@ -217,5 +238,53 @@ describe('handleWebhookEvent - multi-leg shipments', () => {
     deps = makeDeps(event('DELIVERED'), leg('DELIVERED', { isFinal: true }))
     expect(await handleWebhookEvent('w1', deps)).toBe('ignored-terminal')
     expect(deps.submitConfirmDelivery).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleWebhookEvent - several nodes handle the same event', () => {
+  const lose = (d: WebhookDeps) => vi.mocked(d.claimProcessed).mockResolvedValue(false)
+
+  it.each(['PICKUP', 'IN_TRANSIT'])('a node that loses the claim for a %s event logs nothing', async (stage) => {
+    deps = makeDeps(event(stage), primary('SHIPPED'))
+    lose(deps)
+    expect(await handleWebhookEvent('w1', deps)).toBe('skipped-processed')
+    expect(deps.logOracleEvent).not.toHaveBeenCalled()
+  })
+
+  it('a node that loses the claim for RETURN_TO_SENDER sends no notification and writes no log', async () => {
+    deps = makeDeps(event('RETURN_TO_SENDER'), primary('SHIPPED'))
+    deps.openDispute = vi.fn().mockResolvedValue(undefined)
+    lose(deps)
+    expect(await handleWebhookEvent('w1', deps)).toBe('skipped-processed')
+    expect(deps.openDispute).toHaveBeenCalledOnce() // idempotent on-chain, runs on every node
+    expect(deps.notify).not.toHaveBeenCalled()
+    expect(deps.logOracleEvent).not.toHaveBeenCalled()
+  })
+
+  it('does not consume RETURN_TO_SENDER when opening the dispute fails, so the job can retry', async () => {
+    deps = makeDeps(event('RETURN_TO_SENDER'), primary('SHIPPED'))
+    deps.openDispute = vi.fn().mockRejectedValue(new Error('rpc down'))
+    await expect(handleWebhookEvent('w1', deps)).rejects.toThrow('rpc down')
+    expect(deps.claimProcessed).not.toHaveBeenCalled()
+    expect(deps.notify).not.toHaveBeenCalled()
+  })
+
+  it('a node that sent the releasing tx still syncs (for the tx hash) and logs it after losing the claim', async () => {
+    deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
+    lose(deps)
+    expect(await handleWebhookEvent('w1', deps)).toBe('skipped-processed')
+    expect(deps.syncDelivery).toHaveBeenCalledWith('esc1', { status: 'DELIVERED' }, 'a'.repeat(64))
+    expect(vi.mocked(deps.logOracleEvent).mock.calls.map((c) => c[1])).toEqual(['DELIVERY_SUBMITTED'])
+  })
+
+  it('a node that loses the claim for an unmatched or rejected-leg event writes nothing', async () => {
+    deps = makeDeps(event('DELIVERED'), null)
+    lose(deps)
+    expect(await handleWebhookEvent('w1', deps)).toBe('skipped-processed')
+
+    deps = makeDeps(event('DELIVERED'), leg('SHIPPED', { legStatus: 'REJECTED', isFinal: false }))
+    lose(deps)
+    expect(await handleWebhookEvent('w1', deps)).toBe('skipped-processed')
+    expect(deps.logOracleEvent).not.toHaveBeenCalled()
   })
 })

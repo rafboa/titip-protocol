@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const prismaMock = vi.hoisted(() => ({
-  escrow: { findUnique: vi.fn(), update: vi.fn() },
+  escrow: { findUnique: vi.fn(), updateMany: vi.fn() },
   oracleEvent: { create: vi.fn() },
   notification: { create: vi.fn() },
   $transaction: vi.fn(),
@@ -37,7 +37,9 @@ beforeEach(() => {
   process.env.ORACLE_INTERNAL_API_KEY = KEY
   delete process.env.NEXT_PUBLIC_USE_MOCK_CONTRACT
   delete process.env.ORACLE_SECRET_KEY
-  prismaMock.$transaction.mockResolvedValue([{ id: 'esc1', status: 'DELIVERED', deliveredAt: new Date() }])
+  // Interactive transaction: run the callback against the same mock client.
+  prismaMock.$transaction.mockImplementation(async (fn: (tx: typeof prismaMock) => unknown) => fn(prismaMock))
+  prismaMock.escrow.updateMany.mockResolvedValue({ count: 1 })
 })
 
 describe('POST /api/oracle/confirm', () => {
@@ -56,6 +58,20 @@ describe('POST /api/oracle/confirm', () => {
     prismaMock.escrow.findUnique.mockResolvedValue(null)
     const { POST } = await import('@/app/api/oracle/confirm/route')
     expect((await POST(req({ escrowId: 'missing' }))).status).toBe(404)
+  })
+
+  it('stores the release tx hash (set once) when a node without a hash synced first and this one gets the 409', async () => {
+    prismaMock.escrow.findUnique.mockResolvedValue({ ...shippedEscrow, status: 'DELIVERED' })
+    const { POST } = await import('@/app/api/oracle/confirm/route')
+    expect((await POST(req({ escrowId: 'esc1', txHash: TX_HASH }))).status).toBe(409)
+    expect(prismaMock.escrow.updateMany).toHaveBeenCalledWith({
+      where: { id: 'esc1', status: 'DELIVERED', txHashRelease: null },
+      data: { txHashRelease: TX_HASH },
+    })
+    // No hash in the request: nothing to record.
+    prismaMock.escrow.updateMany.mockClear()
+    expect((await POST(req({ escrowId: 'esc1' }))).status).toBe(409)
+    expect(prismaMock.escrow.updateMany).not.toHaveBeenCalled()
   })
 
   it('returns 409 when the DB escrow is not SHIPPED', async () => {
@@ -88,9 +104,10 @@ describe('POST /api/oracle/confirm', () => {
     expect(res.status).toBe(200)
     expect(getOnChainEscrow).toHaveBeenCalledWith(7n)
     expect(prismaMock.$transaction).toHaveBeenCalledOnce()
-    expect(prismaMock.escrow.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'DELIVERED', txHashRelease: TX_HASH }) })
-    )
+    expect(prismaMock.escrow.updateMany).toHaveBeenCalledWith({
+      where: { id: 'esc1', status: 'SHIPPED' },
+      data: expect.objectContaining({ status: 'DELIVERED', txHashRelease: TX_HASH }),
+    })
   })
 
   it('records the oracle node that synced the delivery, falling back to "unknown"', async () => {
@@ -112,5 +129,29 @@ describe('POST /api/oracle/confirm', () => {
   it('rejects a malformed nodeId', async () => {
     const { POST } = await import('@/app/api/oracle/confirm/route')
     expect((await POST(req({ escrowId: 'esc1', nodeId: 'bad id; drop' }))).status).toBe(400)
+  })
+
+  it('returns 409 and writes no event or notification when another node already synced (race)', async () => {
+    prismaMock.escrow.findUnique.mockResolvedValue(shippedEscrow)
+    getOnChainEscrow.mockResolvedValue({ status: 'Delivered' })
+    prismaMock.escrow.updateMany.mockResolvedValue({ count: 0 })
+    const { POST } = await import('@/app/api/oracle/confirm/route')
+    const res = await POST(req({ escrowId: 'esc1', txHash: TX_HASH }))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: string }).error).toContain('status "DELIVERED"')
+    expect(prismaMock.oracleEvent.create).not.toHaveBeenCalled()
+    expect(prismaMock.notification.create).not.toHaveBeenCalled()
+  })
+
+  it('still records the release tx hash (set once) when the node that sent it lost the race', async () => {
+    prismaMock.escrow.findUnique.mockResolvedValue(shippedEscrow)
+    getOnChainEscrow.mockResolvedValue({ status: 'Delivered' })
+    prismaMock.escrow.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 })
+    const { POST } = await import('@/app/api/oracle/confirm/route')
+    expect((await POST(req({ escrowId: 'esc1', txHash: TX_HASH }))).status).toBe(409)
+    expect(prismaMock.escrow.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'esc1', status: 'DELIVERED', txHashRelease: null },
+      data: { txHashRelease: TX_HASH },
+    })
   })
 })

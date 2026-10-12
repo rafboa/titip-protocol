@@ -8,12 +8,15 @@
  *           escrow has NOT been released while fewer than M oracles are running, and print
  *           the on-chain approvals.
  *   check   <escrowRowId>  poll until DELIVERED (start more nodes first), then print approvals.
+ *   webhook release through a signed courier webhook only (needs COURIER_WEBHOOK_SECRET_JNT, same as the
+ *           running web app); asserts >= M nodes approved and one WEBHOOK_DELIVERED / DELIVERY_CONFIRMED.
  *
  * Usage:
  *   npx dotenv-cli -e .env.local -- npx tsx scripts/verify-oracle-quorum.ts start
  *   npx dotenv-cli -e .env.local -- npx tsx scripts/verify-oracle-quorum.ts check <rowId>
  */
 
+import crypto from 'crypto'
 import {
   Address,
   BASE_FEE,
@@ -102,7 +105,8 @@ function short(address: string): string {
   return `${address.slice(0, 5)}...${address.slice(-4)}`
 }
 
-async function start(): Promise<void> {
+/** Creates a Shipped escrow on-chain and the matching SHIPPED DB row (courier ANTERAJA -> mock adapter). */
+async function createShippedEscrow(trackingNumber: string) {
   const ledger = await server.getLatestLedger()
   console.log('[1] on-chain: create_escrow, fund, submit_tracking')
   const created = await send(
@@ -120,7 +124,7 @@ async function start(): Promise<void> {
     seller,
     'submit_tracking',
     nativeToScVal(contractEscrowId, { type: 'u64' }),
-    nativeToScVal('E2E0000000002', { type: 'string' }),
+    nativeToScVal(trackingNumber, { type: 'string' }),
     nativeToScVal('anteraja', { type: 'string' })
   )
   console.log(`    escrow ${contractEscrowId} is Shipped on-chain`)
@@ -136,7 +140,7 @@ async function start(): Promise<void> {
       sellerAddress: seller.publicKey(),
       amountUsdc: '10',
       status: 'SHIPPED',
-      trackingNumber: 'E2E0000000002',
+      trackingNumber,
       courierCode: 'ANTERAJA',
       timeoutAt: new Date(Date.now() + 3 * 3600 * 1000),
       fundedAt: new Date(),
@@ -144,6 +148,11 @@ async function start(): Promise<void> {
     },
   })
   console.log(`[2] DB row ${row.id}`)
+  return { contractEscrowId, row }
+}
+
+async function start(): Promise<void> {
+  const { contractEscrowId, row } = await createShippedEscrow('E2E0000000002')
 
   console.log(`[3] watching ${WATCH_SECONDS}s: with fewer than M nodes the escrow must NOT be released`)
   await sleep(WATCH_SECONDS * 1000)
@@ -176,8 +185,79 @@ async function check(rowId: string): Promise<void> {
   console.log('\nPASS (stage 2): released after quorum was reached')
 }
 
+/**
+ * Webhook-only release: the escrow has an APPROVED extra leg, so the poller never releases it
+ * (it only decides on the primary tracking number). A signed DELIVERED webhook for the final leg
+ * is then the only thing that can reach the quorum, which every running node must handle.
+ */
+async function webhook(): Promise<void> {
+  const secret = process.env.COURIER_WEBHOOK_SECRET_JNT
+  if (!secret) throw new Error('Set COURIER_WEBHOOK_SECRET_JNT (the same value the running web app uses)')
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+
+  const run = Date.now()
+  const { contractEscrowId, row } = await createShippedEscrow(`E2EPRIMARY${run}`)
+  const legTracking = `E2ELEG${run}`
+  await prisma.shipmentLeg.create({
+    data: { escrowId: row.id, seq: 1, courier: 'JNT', trackingNumber: legTracking, status: 'APPROVED', decidedAt: new Date() },
+  })
+
+  const body = JSON.stringify({
+    event_id: `quorum-${run}-DELIVERED`,
+    tracking_number: legTracking,
+    status: 'DELIVERED',
+    occurred_at: new Date().toISOString(),
+  })
+  const signature = crypto.createHmac('sha256', secret).update(body).digest('hex')
+  const res = await fetch(`${base}/api/webhooks/courier/jnt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-courier-signature': signature },
+    body,
+  })
+  console.log(`[3] signed DELIVERED webhook for the final leg -> ${res.status} ${await res.text()}`)
+  if (res.status !== 202) throw new Error('webhook was not accepted (is the web app running with the same secret?)')
+
+  await waitDelivered(row.id, WAIT_SECONDS)
+  const final = await prisma.escrow.findUnique({ where: { id: row.id } })
+  const events = await prisma.oracleEvent.findMany({ where: { escrowId: row.id }, select: { eventType: true, oracleNodeId: true } })
+  const count = (type: string) => events.filter((e) => e.eventType === type).length
+  const submitters = new Set(events.filter((e) => e.eventType === 'DELIVERY_SUBMITTED').map((e) => e.oracleNodeId))
+  const notifications = await prisma.notification.count({ where: { message: { contains: row.id } } })
+  const approvals = await readApprovals(contractEscrowId)
+  console.log(`    status ${final?.status}, txHashRelease ${final?.txHashRelease ?? 'null'}`)
+  console.log(`    events: ${events.map((e) => `${e.eventType}@${e.oracleNodeId}`).join(', ')}`)
+  console.log(`    buyer notifications: ${notifications}, on-chain approvals left: ${approvals.length}`)
+
+  const problems: string[] = []
+  if (final?.status !== 'DELIVERED') problems.push('not DELIVERED')
+  if (!final?.txHashRelease) problems.push('txHashRelease missing')
+  if (submitters.size < 2) problems.push(`only ${submitters.size} node(s) approved (need the quorum)`)
+  if (count('WEBHOOK_DELIVERED') !== 1) problems.push(`WEBHOOK_DELIVERED x${count('WEBHOOK_DELIVERED')} (expected 1)`)
+  if (count('DELIVERY_CONFIRMED') !== 1) problems.push(`DELIVERY_CONFIRMED x${count('DELIVERY_CONFIRMED')} (expected 1)`)
+  if (notifications !== 1) problems.push(`${notifications} buyer notifications (expected 1)`)
+  await assertNoRepeatedEvents(row.id)
+  if (problems.length > 0) throw new Error(problems.join('; '))
+  console.log('\nPASS (webhook): released by the quorum through the webhook path only')
+}
+
+async function waitDelivered(rowId: string, seconds: number): Promise<void> {
+  const deadline = Date.now() + seconds * 1000
+  while (Date.now() < deadline) {
+    await sleep(3000)
+    const row = await prisma.escrow.findUnique({ where: { id: rowId } })
+    if (row?.status === 'DELIVERED') return
+  }
+}
+
 const [mode, arg] = process.argv.slice(2)
-const run = mode === 'start' ? start() : mode === 'check' && arg ? check(arg) : Promise.reject(new Error('usage: start | check <rowId>'))
+const run =
+  mode === 'start'
+    ? start()
+    : mode === 'check' && arg
+      ? check(arg)
+      : mode === 'webhook'
+        ? webhook()
+        : Promise.reject(new Error('usage: start | check <rowId> | webhook'))
 run
   .catch((err) => {
     console.error('\nFAIL:', err instanceof Error ? err.message : err)
