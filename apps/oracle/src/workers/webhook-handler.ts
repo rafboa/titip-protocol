@@ -10,6 +10,12 @@
 //  - Terminal escrows (DELIVERED / REFUNDED) are never touched again, so stale or reordered
 //    events are harmless.
 //  - Every handled event is logged to oracle_events; handling is idempotent via processedAt.
+//  - With an M-of-N oracle set a final DELIVERED is NOT finished by the first node that approves:
+//    processedAt is global (shared DB) but every node must get to approve, so the event stays
+//    unprocessed (re-handled each cycle, a no-op for nodes that already approved) until the
+//    delivery is released. Only transactions a node actually sends are logged for it.
+
+import { eventTypeForDeliveryStep, type DeliveryStep } from '../stellar/quorum.js'
 
 export type WebhookEventRow = {
   id: string
@@ -58,7 +64,7 @@ export type WebhookDeps = {
   submitConfirmDelivery(
     contractAddress: string,
     contractEscrowId: bigint,
-  ): Promise<{ released: boolean; txHash: string | null }>
+  ): Promise<{ released: boolean; txHash: string | null; step: DeliveryStep['kind'] }>
   /** Tells the web app to re-read the chain and sync the DB. */
   syncDelivery(escrowId: string, payload: Record<string, unknown>, txHash: string | null): Promise<void>
   /**
@@ -110,7 +116,10 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
   if (proposedLeg || finalDeliveryWaiting) return 'deferred'
 
   const payload = asRecord(event.payload)
-  await deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
+  // A final delivery on a SHIPPED escrow is logged after the chain step (it may be re-handled many
+  // times while the quorum is pending); everything else is handled exactly once.
+  const releasing = event.stage === 'DELIVERED' && escrow.status === 'SHIPPED' && ref.isFinal
+  if (!releasing) await deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
 
   if (ref.kind === 'LEG' && ref.legStatus === 'REJECTED') {
     await deps.markProcessed(event.id)
@@ -126,13 +135,18 @@ export async function handleWebhookEvent(id: string, deps: WebhookDeps): Promise
     } else if (!ref.isFinal) {
       outcome = 'leg-delivered'
     } else {
-      const { released, txHash } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
+      const { released, txHash, step } = await deps.submitConfirmDelivery(escrow.contractAddress, escrow.contractEscrowId)
+      const submitted = eventTypeForDeliveryStep(step, txHash)
       if (released) {
+        await deps.logOracleEvent(escrow.id, `WEBHOOK_${event.stage}`, payload)
+        if (submitted) await deps.logOracleEvent(escrow.id, submitted, { step, released, txHash })
         await deps.syncDelivery(escrow.id, payload, txHash)
         outcome = 'delivered'
       } else {
-        // This node did its part; the other oracles complete the quorum and sync the web app.
-        outcome = 'awaiting-quorum'
+        if (submitted) await deps.logOracleEvent(escrow.id, submitted, { step, released, txHash, webhook: payload })
+        // This node did its part; the other oracles still have to approve and each of them must
+        // see this event, so leave it unprocessed instead of consuming it for everyone.
+        return 'awaiting-quorum'
       }
     }
   } else if (event.stage === 'RETURN_TO_SENDER') {

@@ -89,45 +89,63 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const [updated] = await prisma.$transaction([
-      prisma.escrow.update({
-        where: { id: escrowId },
-        data: {
-          status: 'DELIVERED',
-          deliveredAt: new Date(),
-          ...(txHash ? { txHashRelease: txHash } : {}),
-        },
-      }),
-      prisma.oracleEvent.create({
+    // Several oracle nodes sync the same release at about the same time. The status guard in the
+    // update makes this atomic: exactly one request flips SHIPPED -> DELIVERED and writes the
+    // event and notifications, the others get the same 409 as a late request.
+    const deliveredAt = new Date()
+    const synced = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.escrow.updateMany({
+        where: { id: escrowId, status: 'SHIPPED' },
+        data: { status: 'DELIVERED', deliveredAt, ...(txHash ? { txHashRelease: txHash } : {}) },
+      })
+      if (claimed.count === 0) return false
+
+      await tx.oracleEvent.create({
         data: {
           escrowId,
           eventType: 'DELIVERY_CONFIRMED',
           courierResponse: (courierResponse ?? undefined) as Prisma.InputJsonValue | undefined,
           oracleNodeId: nodeId ?? 'unknown',
         },
-      }),
+      })
       // Notify seller — funds released
-      prisma.notification.create({
+      await tx.notification.create({
         data: {
           userAddress: escrow.sellerAddress,
           type: 'FUNDS_RELEASED',
           message: `Delivery confirmed! ${escrow.amountUsdc} USDC has been released to your account.`,
         },
-      }),
+      })
       // Notify buyer — delivery confirmed
-      prisma.notification.create({
+      await tx.notification.create({
         data: {
           userAddress: escrow.buyerAddress,
           type: 'DELIVERY_CONFIRMED',
           message: `Your order has been delivered. Escrow ${escrow.id} is now complete.`,
         },
-      }),
-    ])
+      })
+      return true
+    })
+
+    if (!synced) {
+      // The node that actually sent the releasing transaction may lose the race to a node that only
+      // saw the escrow already Delivered (no tx). Keep the release hash, set once, for the audit trail.
+      if (txHash) {
+        await prisma.escrow.updateMany({
+          where: { id: escrowId, status: 'DELIVERED', txHashRelease: null },
+          data: { txHashRelease: txHash },
+        })
+      }
+      return NextResponse.json(
+        { error: 'Cannot confirm delivery for escrow with status "DELIVERED". Expected "SHIPPED".' },
+        { status: 409 }
+      )
+    }
 
     return NextResponse.json({
-      id: updated.id,
-      status: updated.status,
-      deliveredAt: updated.deliveredAt?.toISOString(),
+      id: escrowId,
+      status: 'DELIVERED',
+      deliveredAt: deliveredAt.toISOString(),
     })
   } catch (error: unknown) {
     console.error('[POST /api/oracle/confirm] Error:', error)

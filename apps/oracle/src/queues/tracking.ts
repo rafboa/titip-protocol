@@ -23,10 +23,14 @@ export type WebhookJobData = {
 /** Everything that can sit on the tracking queue */
 export type TrackingQueueData = TrackingJobData | WebhookJobData
 
-/** Name of the BullMQ queue */
-export const TRACKING_QUEUE_NAME = 'tracking'
+/**
+ * Name of this node's BullMQ queue. One queue per node: a job runs on exactly one worker of its
+ * queue, so with a shared queue only one node would ever evaluate an escrow and the M-of-N quorum
+ * would depend on which worker happens to pick up later re-enqueued jobs.
+ */
+export const TRACKING_QUEUE_NAME = `tracking-${config.ORACLE_NODE_ID}`
 
-/** Shared BullMQ queue instance — used by poller to enqueue jobs */
+/** This node's BullMQ queue — used by the poller to enqueue jobs for its own worker */
 export const trackingQueue = new Queue<TrackingQueueData>(TRACKING_QUEUE_NAME, {
   connection: {
     url: config.REDIS_URL,

@@ -64,6 +64,16 @@ export function eventTypeForDeliveryStep(step: DeliveryStep['kind'], txHash: str
 }
 
 /**
+ * True for a failure of the transaction itself (rejected by the network, or included but failed),
+ * which is worth one more try with fresh state. Reads, config errors and wrong-status/not-in-set
+ * decisions are not retried.
+ */
+export function isRetryableSubmitError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /did not succeed|submission failed/.test(message)
+}
+
+/**
  * True when the web app's /api/oracle/confirm 409 body says the escrow is already DELIVERED, i.e.
  * another oracle node already synced this delivery.
  */

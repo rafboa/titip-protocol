@@ -56,7 +56,7 @@ function makeDeps(ev: WebhookEventRow | null, ref: ShipmentRef | null): WebhookD
     markProcessed: vi.fn().mockResolvedValue(undefined),
     logOracleEvent: vi.fn().mockResolvedValue(undefined),
     notify: vi.fn().mockResolvedValue(undefined),
-    submitConfirmDelivery: vi.fn().mockResolvedValue({ released: true, txHash: 'a'.repeat(64) }),
+    submitConfirmDelivery: vi.fn().mockResolvedValue({ released: true, txHash: 'a'.repeat(64), step: 'approve' }),
     syncDelivery: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -104,17 +104,39 @@ describe('handleWebhookEvent - single shipment', () => {
 
   it('syncs the web app even when the final approval was sent by another oracle (no tx from this node)', async () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
-    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: true, txHash: null })
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: true, txHash: null, step: 'already-delivered' })
     expect(await handleWebhookEvent('w1', deps)).toBe('delivered')
     expect(deps.syncDelivery).toHaveBeenCalledWith('esc1', { status: 'DELIVERED' }, null)
   })
 
-  it('does not sync the web app while the oracle quorum is not reached, and finishes this event', async () => {
+  it('does not sync or finish the event while the oracle quorum is not reached, so every node can approve', async () => {
     deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
-    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: 'b'.repeat(64) })
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: 'b'.repeat(64), step: 'approve' })
     expect(await handleWebhookEvent('w1', deps)).toBe('awaiting-quorum')
     expect(deps.syncDelivery).not.toHaveBeenCalled()
-    expect(deps.logOracleEvent).toHaveBeenCalledWith('esc1', 'WEBHOOK_DELIVERED', { status: 'DELIVERED' })
+    expect(deps.markProcessed).not.toHaveBeenCalled()
+    // The approval this node sent is the only event; the webhook itself is not logged yet.
+    expect(deps.logOracleEvent).toHaveBeenCalledTimes(1)
+    expect(deps.logOracleEvent).toHaveBeenCalledWith('esc1', 'DELIVERY_SUBMITTED', {
+      step: 'approve',
+      released: false,
+      txHash: 'b'.repeat(64),
+      webhook: { status: 'DELIVERED' },
+    })
+  })
+
+  it('writes nothing when a node that already approved re-handles the pending event', async () => {
+    deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
+    vi.mocked(deps.submitConfirmDelivery).mockResolvedValue({ released: false, txHash: null, step: 'waiting' })
+    expect(await handleWebhookEvent('w1', deps)).toBe('awaiting-quorum')
+    expect(deps.logOracleEvent).not.toHaveBeenCalled()
+    expect(deps.markProcessed).not.toHaveBeenCalled()
+  })
+
+  it('logs the webhook and the approval of this node once the delivery is released, then finishes the event', async () => {
+    deps = makeDeps(event('DELIVERED'), primary('SHIPPED'))
+    expect(await handleWebhookEvent('w1', deps)).toBe('delivered')
+    expect(vi.mocked(deps.logOracleEvent).mock.calls.map((c) => c[1])).toEqual(['WEBHOOK_DELIVERED', 'DELIVERY_SUBMITTED'])
     expect(deps.markProcessed).toHaveBeenCalledWith('w1')
   })
 

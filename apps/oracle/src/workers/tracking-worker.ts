@@ -11,10 +11,8 @@
 import { Worker, type Job, type WorkerOptions } from 'bullmq'
 import { PrismaClient, type CourierCode, type Prisma } from '@prisma/client'
 import { TRACKING_QUEUE_NAME, type TrackingJobData, type TrackingQueueData } from '../queues/tracking.js'
-import { jntAdapter } from '../couriers/jnt.js'
-import { jneAdapter } from '../couriers/jne.js'
-import { sicepatAdapter } from '../couriers/sicepat.js'
 import { mockAdapter } from '../couriers/mock.js'
+import { resolveAdapter } from '../couriers/registry.js'
 import { confirmDelivery, submitConfirmDeliveryOnChain, submitDisputeOnChain } from '../stellar/submit.js'
 import { eventTypeForDeliveryStep } from '../stellar/quorum.js'
 import { config } from '../config.js'
@@ -22,19 +20,6 @@ import type { CourierAdapter } from '../couriers/types.js'
 import { handleWebhookEvent, type WebhookDeps } from './webhook-handler.js'
 
 const prisma = new PrismaClient()
-
-// ---------------------------------------------------------------------------
-// Courier registry — add new adapters here.
-// Falls back to mockAdapter when the real API key is absent (testnet/demo).
-// TODO(mainnet): Remove mock fallbacks — require all API keys.
-// ---------------------------------------------------------------------------
-function resolveAdapter(code: string): CourierAdapter {
-  const upper = code.toUpperCase()
-  if (upper === 'JNT')     return config.JNT_API_KEY     ? jntAdapter     : mockAdapter
-  if (upper === 'JNE')     return config.JNE_API_KEY     ? jneAdapter     : mockAdapter
-  if (upper === 'SICEPAT') return config.SICEPAT_API_KEY ? sicepatAdapter : mockAdapter
-  return mockAdapter // Unknown courier → mock for safety on testnet
-}
 
 // ---------------------------------------------------------------------------
 // Custom backoff: 1min → 5min → 15min (claude.md spec)
@@ -51,7 +36,7 @@ async function processTrackingJob(job: Job<TrackingJobData>): Promise<void> {
     `[worker] Processing job ${job.id} — escrow=${escrowId} courier=${courierCode} tracking=${trackingNumber}`
   )
 
-  const adapter = resolveAdapter(courierCode)
+  const adapter = resolveAdapter(courierCode, config, config.STELLAR_NETWORK)
   if (adapter === mockAdapter && !config.JNT_API_KEY && !config.JNE_API_KEY && !config.SICEPAT_API_KEY) {
     console.warn(`[worker] No API key for ${courierCode} — using mock adapter (testnet only)`)
   }
@@ -201,10 +186,11 @@ const webhookDeps: WebhookDeps = {
     }
   },
   recordLegStage: async (legId, stage) => {
-    await prisma.shipmentLeg.update({
-      where: { id: legId },
-      data: { stage, ...(stage === 'DELIVERED' ? { deliveredAt: new Date() } : {}) },
-    })
+    await prisma.shipmentLeg.update({ where: { id: legId }, data: { stage } })
+    if (stage === 'DELIVERED') {
+      // The event is re-handled every cycle while the oracle quorum is pending; keep the first time.
+      await prisma.shipmentLeg.updateMany({ where: { id: legId, deliveredAt: null }, data: { deliveredAt: new Date() } })
+    }
   },
   markProcessed: async (id) => {
     await prisma.webhookEvent.update({ where: { id }, data: { processedAt: new Date() } })

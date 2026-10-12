@@ -18,6 +18,7 @@ import { config } from '../config.js'
 import {
   decideDeliveryStep,
   isAlreadyDeliveredResponse,
+  isRetryableSubmitError,
   parseApprovals,
   parseOracleSet,
   type DeliveryStep,
@@ -143,6 +144,23 @@ export async function submitConfirmDeliveryOnChain(
   contractAddress: string,
   contractEscrowId: bigint
 ): Promise<DeliveryResult> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await attemptDelivery(contractAddress, contractEscrowId)
+    } catch (err) {
+      if (attempt >= SUBMIT_ATTEMPTS || !isRetryableSubmitError(err)) throw err
+      // Nodes that approve in the same ledger simulate against the same state, so all but one
+      // can fail on-chain. Re-read the state after a short random pause and decide again.
+      const pauseMs = 300 + Math.floor(Math.random() * 1200)
+      console.warn(`[submit] escrow ${contractEscrowId}: attempt ${attempt} failed, re-reading state in ${pauseMs}ms`)
+      await new Promise((resolve) => setTimeout(resolve, pauseMs))
+    }
+  }
+}
+
+const SUBMIT_ATTEMPTS = 3
+
+async function attemptDelivery(contractAddress: string, contractEscrowId: bigint): Promise<DeliveryResult> {
   const idArg = nativeToScVal(contractEscrowId, { type: 'u64' })
   const me = oracleKeypair.publicKey()
 
