@@ -177,6 +177,28 @@ describe('object storage', () => {
   })
 })
 
+describe('metadata stripping on upload', () => {
+  const clean = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46, 0xff, 0xda, 0x00, 0x04, 0x01, 0x02, 0x11, 0xff, 0xd9])
+  const withExif = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46, 0xff, 0xe1, 0x00, 0x06, 0x45, 0x78, 0x69, 0x66,
+    0xff, 0xda, 0x00, 0x04, 0x01, 0x02, 0x11, 0xff, 0xd9,
+  ])
+
+  it('stores and commits the cleaned file, while the client hash is checked against what it sent', async () => {
+    const res = await uploadEvidence(uploadReq(withExif), listCtx)
+    expect(res.status).toBe(200)
+    expect((await res.json()).sha256).toBe(sha(clean))
+    const data = prismaMock.evidenceFile.create.mock.calls[0][0].data
+    expect(data.sha256).toBe(sha(clean))
+    expect(data.sizeBytes).toBe(clean.length)
+    expect(chainMock.buildSubmitEvidenceTx).toHaveBeenCalledWith(BUYER, 7n, sha(clean), 'titip:evidence/ev1')
+  })
+
+  it('still rejects a hash that does not match the uploaded bytes', async () => {
+    expect((await uploadEvidence(uploadReq(withExif, sha(clean)), listCtx)).status).toBe(400)
+  })
+})
+
 describe('POST /api/escrow/[id]/evidence (upload)', () => {
   it('stores the file, hashes it on the server and returns the unsigned submit_evidence XDR', async () => {
     const bytes = jpeg()
